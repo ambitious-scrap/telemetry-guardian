@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
+.memsearch/
+.idea/
+.vscode/
+node_modules/
+dist/
+build/
+coverage/
+*.log
+*.test
+/guardian
+/verdict.json
