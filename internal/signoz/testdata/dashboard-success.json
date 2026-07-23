@@ -4,13 +4,13 @@
     "id": "dashboard-fixture-id",
     "webUrl": "https://signoz.example/dashboards/dashboard-fixture-id",
     "data": {
-      "title": "Checkout overview",
+      "title": "telemetry-guardian-checkout",
       "description": "Sanitized dashboard fixture",
       "widgets": [
         {
           "id": "cart-value-panel",
           "title": "Cart value",
-          "description": "Sanitized panel fixture",
+          "description": "Depends on cart.value from payment.authorize spans",
           "panelTypes": "graph",
           "query": {
             "queryType": "builder",
@@ -21,7 +21,7 @@
                   "dataSource": "traces",
                   "aggregateOperator": "sum",
                   "aggregations": [{"expression": "sum(cart.value)"}],
-                  "filter": {"expression": "service.name = 'checkout'"},
+                  "filter": {"expression": "service.name = 'checkout' AND run.id = '__RUN_ID__'"},
                   "stepInterval": 10,
                   "disabled": false,
                   "legend": "cart.value"

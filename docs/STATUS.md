@@ -2,11 +2,11 @@
 
 ## Current phase
 
-- Phase: 2 — Empirically verified SigNoz adapter
+- Phase: 3 — Consumer-driven contract miner
 - Owner: Codex implementation
-- Branch: `phase/2-signoz-adapter`
+- Branch: `phase/3-contract-miner`
 - State: acceptance passed; awaiting external review
-- Scope: typed SigNoz HTTP boundary, fixture fake, sanitized fixtures, empirical API notes, and Phase 2 acceptance only
+- Scope: stable contract domain, fixture-proven dashboard/alert extraction, deterministic YAML, `guardian mine`, and Phase 3 acceptance only
 
 ## Authority
 
@@ -79,7 +79,24 @@ or resource values were recorded.
   `scripts/accept/phase2.sh` acceptance path passed against the Phase 1
   instance without recording credentials or raw telemetry.
 
+## Phase 3 implementation findings
+
+- The miner consumes only `internal/signoz.SigNozClient`; no SigNoz HTTP calls
+  were added outside the typed adapter.
+- The supported shape is one traces Builder query per dashboard panel and one
+  traces Builder query per alert, with conjunction filters and the proven
+  `sum(cart.value)` / `count()` aggregations.
+- Source JSON paths are retained by the typed boundary and emitted on every
+  derived requirement and consumer mapping.
+- Unsupported query nodes, unknown fields, missing filters or identities, bad
+  field types, empty resources, and malformed paths fail explicitly.
+- Normalized requirements retain every dashboard-panel and alert consumer;
+  run IDs are canonicalized to `__RUN_ID__` so generated output is stable.
+- `make accept-phase3` passed the offline suite, fixture golden/mutation tests,
+  secret scan, and focused live mining smoke against the seeded Phase 1
+  dashboard and alert.
+
 ## Deferred work
 
-Contract mining, verification, evidence, CI, blast graph, and product UI remain
-assigned to later phases.
+Verification, evidence, CI, blast graph, and product UI remain assigned to later
+phases.

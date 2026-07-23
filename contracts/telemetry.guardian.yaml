@@ -1,0 +1,66 @@
+apiVersion: telemetry.guardian/v1
+service: checkout
+release: candidate
+
+consumers:
+  - id: alert-payment-timeout
+    type: alert
+    name: telemetry-guardian-payment-timeout
+    criticality: required
+    source:
+      alert_id: alert-fixture-id
+    requires:
+      - id: alert-must-fire-payment-timeout
+        source_path: "$.data.alert"
+      - id: required-field-error-type
+        source_path: "$.data.condition.compositeQuery.queries[0].spec.filter.expression"
+      - id: required-operation-payment-authorize
+        source_path: "$.data.annotations.description"
+  - id: dashboard-panel-telemetry-guardian-checkout-cart-value-panel
+    type: dashboard_panel
+    name: Cart value
+    criticality: required
+    source:
+      dashboard_id: dashboard-fixture-id
+      panel_id: cart-value-panel
+    requires:
+      - id: required-field-cart-value
+        source_path: "$.data.data.widgets[0].query.builder.queryData[0].aggregations[0].expression"
+      - id: required-operation-payment-authorize
+        source_path: "$.data.data.widgets[0].description"
+
+checks:
+  - id: required-field-cart-value
+    type: required_field
+    signal: traces
+    field: cart.value
+    source_path: "$.data.data.widgets[0].query.builder.queryData[0].aggregations[0].expression"
+    filter: "service.name = 'checkout' AND run.id = '__RUN_ID__'"
+    consumers:
+      - dashboard-panel-telemetry-guardian-checkout-cart-value-panel
+  - id: required-field-error-type
+    type: required_field
+    signal: traces
+    field: error.type
+    source_path: "$.data.condition.compositeQuery.queries[0].spec.filter.expression"
+    filter: "service.name = 'checkout' AND run.id = '__RUN_ID__' AND error.type = 'payment_timeout'"
+    consumers:
+      - alert-payment-timeout
+  - id: required-operation-payment-authorize
+    type: required_operation
+    signal: traces
+    operation: payment.authorize
+    source_path: "$.data.annotations.description"
+    source_paths:
+      - "$.data.annotations.description"
+      - "$.data.data.widgets[0].description"
+    consumers:
+      - alert-payment-timeout
+      - dashboard-panel-telemetry-guardian-checkout-cart-value-panel
+  - id: alert-must-fire-payment-timeout
+    type: alert_must_fire
+    alert_id: payment-timeout
+    timeout: 60s
+    source_path: "$.data.alert"
+    consumers:
+      - alert-payment-timeout
