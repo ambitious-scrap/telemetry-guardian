@@ -95,15 +95,17 @@ var (
 	ErrTimeout         = errors.New("signoz timeout")
 	ErrInvalidResponse = errors.New("signoz invalid response")
 	ErrInvalidRequest  = errors.New("signoz invalid request")
+	ErrMissingField    = errors.New("signoz field not found")
 )
 
 // Error is a stable, secret-safe classification of an adapter failure.
 type Error struct {
-	Kind       ErrorKind
-	StatusCode int
-	Operation  string
-	Code       string
-	cause      error
+	Kind         ErrorKind
+	StatusCode   int
+	Operation    string
+	Code         string
+	MissingField bool
+	cause        error
 }
 
 func (e *Error) Error() string {
@@ -132,6 +134,8 @@ func (e *Error) Is(target error) bool {
 		return e.Kind == ErrorInvalidResponse
 	case ErrInvalidRequest:
 		return e.Kind == ErrorInvalidRequest
+	case ErrMissingField:
+		return e.MissingField
 	default:
 		return false
 	}
@@ -489,7 +493,7 @@ func newQueryRequest(request BuilderQueryRequest) (queryRequestWire, error) {
 		RequestType:   "time_series",
 		CompositeQuery: compositeQueryRequestWire{Queries: []queryRequestItemWire{{
 			Type: "builder_query",
-			Spec: querySpecWire{
+			Spec: queryRequestSpecWire{
 				Name: name, Signal: request.Signal, StepInterval: step, Disabled: false,
 				Filter: filterWire{Expression: request.Filter}, Aggregations: aggregations,
 			},
@@ -522,12 +526,16 @@ func timeoutError(operation string, cause error) error {
 
 func statusError(operation string, status int, payload []byte) error {
 	code := ""
+	missingField := false
 	var envelope responseEnvelope
 	if json.Unmarshal(payload, &envelope) == nil {
 		code = envelope.Error.Code
 		if code == "" {
 			code = envelope.Error.Type
 		}
+		missingField = status == http.StatusBadRequest &&
+			strings.HasPrefix(envelope.Error.Message, "key ") &&
+			strings.HasSuffix(envelope.Error.Message, " not found")
 	}
 	kind := ErrorUnexpected
 	var cause error
@@ -543,7 +551,7 @@ func statusError(operation string, status int, payload []byte) error {
 	case http.StatusBadRequest:
 		kind, cause = ErrorInvalidRequest, ErrInvalidRequest
 	}
-	return &Error{Kind: kind, StatusCode: status, Operation: operation, Code: code, cause: cause}
+	return &Error{Kind: kind, StatusCode: status, Operation: operation, Code: code, MissingField: missingField, cause: cause}
 }
 
 func isNetworkTimeout(err error) bool {
@@ -611,7 +619,7 @@ type querySpecWire struct {
 	FieldDataType     string            `json:"fieldDataType,omitempty"`
 	GroupBy           []queryFieldWire  `json:"groupBy"`
 	OrderBy           []json.RawMessage `json:"orderBy"`
-	Having            []json.RawMessage `json:"having"`
+	Having            json.RawMessage   `json:"having"`
 	Functions         []json.RawMessage `json:"functions"`
 }
 
@@ -781,7 +789,7 @@ func mapQuerySpecAt(spec querySpecWire, sourcePath, nodeType string) QuerySpec {
 	if len(spec.OrderBy) > 0 {
 		unsupported = append(unsupported, "orderBy")
 	}
-	if len(spec.Having) > 0 {
+	if hasJSONContent(spec.Having) {
 		unsupported = append(unsupported, "having")
 	}
 	if len(spec.Functions) > 0 {
@@ -792,6 +800,31 @@ func mapQuerySpecAt(spec querySpecWire, sourcePath, nodeType string) QuerySpec {
 		Aggregations: aggregations, Filter: spec.Filter.Expression, FilterSourcePath: filterPath, FilterDataType: firstNonEmpty(spec.Filter.FieldDataType, spec.Filter.DataType), StepInterval: spec.StepInterval,
 		Disabled: spec.Disabled, Legend: spec.Legend, SourcePath: sourcePath, FieldDataType: spec.FieldDataType,
 		GroupBy: groupBy, UnsupportedNodes: unsupported,
+	}
+}
+
+func hasJSONContent(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return true
+	}
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case []any:
+		return len(typed) > 0
+	case map[string]any:
+		for _, item := range typed {
+			if item != nil && item != "" {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
 	}
 }
 
@@ -845,8 +878,17 @@ type compositeQueryRequestWire struct {
 }
 
 type queryRequestItemWire struct {
-	Type string        `json:"type"`
-	Spec querySpecWire `json:"spec"`
+	Type string               `json:"type"`
+	Spec queryRequestSpecWire `json:"spec"`
+}
+
+type queryRequestSpecWire struct {
+	Name         string            `json:"name"`
+	Signal       string            `json:"signal"`
+	Aggregations []aggregationWire `json:"aggregations"`
+	Filter       filterWire        `json:"filter"`
+	StepInterval int               `json:"stepInterval"`
+	Disabled     bool              `json:"disabled"`
 }
 
 type formatOptionsWire struct {
@@ -855,10 +897,10 @@ type formatOptionsWire struct {
 }
 
 type queryWire struct {
-	Type    string        `json:"type"`
-	Meta    queryMetaWire `json:"meta"`
-	Data    queryDataWire `json:"data"`
-	Warning string        `json:"warning"`
+	Type    string          `json:"type"`
+	Meta    queryMetaWire   `json:"meta"`
+	Data    queryDataWire   `json:"data"`
+	Warning json.RawMessage `json:"warning"`
 }
 
 type queryMetaWire struct {
@@ -911,11 +953,32 @@ func (wire queryWire) result() QueryResult {
 	}
 	return QueryResult{
 		Type: wire.Type, Meta: QueryMeta{RowsScanned: wire.Meta.RowsScanned, BytesScanned: wire.Meta.BytesScanned,
-			DurationMs: wire.Meta.DurationMs, StepIntervals: wire.Meta.StepIntervals}, Results: results, Warning: wire.Warning,
+			DurationMs: wire.Meta.DurationMs, StepIntervals: wire.Meta.StepIntervals}, Results: results, Warning: warningText(wire.Warning),
 	}
 }
 
+func warningText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var object struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(raw, &object) == nil {
+		return object.Message
+	}
+	return ""
+}
+
 type historyWire struct {
+	Items      []historyItemWire `json:"items"`
+	Total      int               `json:"total"`
+	NextCursor string            `json:"nextCursor"`
+	Data       *historyDataWire  `json:"data"`
+}
+
+type historyDataWire struct {
 	Items      []historyItemWire `json:"items"`
 	Total      int               `json:"total"`
 	NextCursor string            `json:"nextCursor"`
@@ -923,21 +986,35 @@ type historyWire struct {
 
 type historyItemWire struct {
 	ID        string          `json:"id"`
+	RuleID    string          `json:"ruleId"`
 	State     string          `json:"state"`
 	Timestamp json.RawMessage `json:"timestamp"`
+	UnixMilli json.RawMessage `json:"unixMilli"`
 	CreatedAt string          `json:"createdAt"`
 }
 
 func (wire historyWire) history() (AlertHistory, error) {
-	items := make([]AlertHistoryItem, 0, len(wire.Items))
-	for _, item := range wire.Items {
-		timestamp, err := parseTimestamp(item.Timestamp)
+	data := historyDataWire{Items: wire.Items, Total: wire.Total, NextCursor: wire.NextCursor}
+	if wire.Data != nil {
+		data = *wire.Data
+	}
+	items := make([]AlertHistoryItem, 0, len(data.Items))
+	for _, item := range data.Items {
+		timestampRaw := item.Timestamp
+		if len(timestampRaw) == 0 || string(timestampRaw) == "null" {
+			timestampRaw = item.UnixMilli
+		}
+		timestamp, err := parseTimestamp(timestampRaw)
 		if err != nil {
 			return AlertHistory{}, invalidResponse("GetAlertHistory", err)
 		}
-		items = append(items, AlertHistoryItem{ID: item.ID, State: item.State, Timestamp: timestamp, CreatedAt: item.CreatedAt})
+		id := item.ID
+		if id == "" {
+			id = item.RuleID
+		}
+		items = append(items, AlertHistoryItem{ID: id, State: item.State, Timestamp: timestamp, CreatedAt: item.CreatedAt})
 	}
-	return AlertHistory{Items: items, Total: wire.Total, NextCursor: wire.NextCursor}, nil
+	return AlertHistory{Items: items, Total: data.Total, NextCursor: data.NextCursor}, nil
 }
 
 func parseTimestamp(raw json.RawMessage) (int64, error) {

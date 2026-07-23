@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -57,5 +58,53 @@ func TestIsJSONPath(t *testing.T) {
 		if IsJSONPath(path) {
 			t.Fatalf("malformed JSON path accepted: %q", path)
 		}
+	}
+}
+
+func TestLoadYAMLValidatesStrictly(t *testing.T) {
+	const valid = `apiVersion: telemetry.guardian/v1
+service: checkout
+release: candidate
+consumers:
+  - id: panel
+    type: dashboard_panel
+    name: Cart
+    source:
+      dashboard_id: dashboard
+      panel_id: panel
+    requires:
+      - id: cart
+        source_path: "$.data.panel"
+checks:
+  - id: cart
+    type: required_field
+    signal: traces
+    field: cart.value
+    source_path: "$.data.panel"
+    consumers:
+      - panel
+`
+	loaded, err := LoadYAML(bytes.NewBufferString(valid))
+	if err != nil || len(loaded.Checks) != 1 {
+		t.Fatalf("loaded = %#v, err = %v", loaded, err)
+	}
+	invalid := strings.Replace(valid, "apiVersion:", "unknown:\napiVersion:", 1)
+	if _, err := LoadYAML(strings.NewReader(invalid)); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("unknown field error = %v", err)
+	}
+}
+
+func TestAlertTimeoutMustBePositiveDuration(t *testing.T) {
+	contract := New("checkout", "candidate")
+	contract.Consumers = []Consumer{{
+		ID: "alert", Type: "alert", Name: "Timeout", Source: Source{AlertID: "alert"},
+		Requires: []RequirementRef{{ID: "must-fire", SourcePath: "$.data.alert"}},
+	}}
+	contract.Checks = []Requirement{{
+		ID: "must-fire", Type: "alert_must_fire", AlertID: "payment-timeout", Timeout: "eventually",
+		SourcePath: "$.data.alert", Consumers: []string{"alert"},
+	}}
+	if err := contract.Validate(); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("timeout error = %v", err)
 	}
 }

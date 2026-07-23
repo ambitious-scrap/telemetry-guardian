@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const APIVersion = "telemetry.guardian/v1"
@@ -18,51 +21,72 @@ var jsonPathPattern = regexp.MustCompile(`^\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]
 
 // Contract is the stable, transport-independent mined contract.
 type Contract struct {
-	APIVersion string
-	Service    string
-	Release    string
-	Consumers  []Consumer
-	Checks     []Requirement
+	APIVersion string        `yaml:"apiVersion"`
+	Service    string        `yaml:"service"`
+	Release    string        `yaml:"release"`
+	Consumers  []Consumer    `yaml:"consumers"`
+	Checks     []Requirement `yaml:"checks"`
 }
 
 type Consumer struct {
-	ID          string
-	Type        string
-	Name        string
-	Owner       string
-	Criticality string
-	Source      Source
-	Requires    []RequirementRef
+	ID          string           `yaml:"id"`
+	Type        string           `yaml:"type"`
+	Name        string           `yaml:"name"`
+	Owner       string           `yaml:"owner,omitempty"`
+	Criticality string           `yaml:"criticality,omitempty"`
+	Source      Source           `yaml:"source"`
+	Requires    []RequirementRef `yaml:"requires"`
 }
 
 type Source struct {
-	DashboardID string
-	PanelID     string
-	AlertID     string
+	DashboardID string `yaml:"dashboard_id,omitempty"`
+	PanelID     string `yaml:"panel_id,omitempty"`
+	AlertID     string `yaml:"alert_id,omitempty"`
 }
 
 type RequirementRef struct {
-	ID         string
-	SourcePath string
+	ID         string `yaml:"id"`
+	SourcePath string `yaml:"source_path"`
 }
 
 type Requirement struct {
-	ID          string
-	Type        string
-	Signal      string
-	Field       string
-	Operation   string
-	AlertID     string
-	Timeout     string
-	Filter      string
-	Filters     []string
-	SourcePath  string
-	SourcePaths []string
-	Consumers   []string
+	ID          string   `yaml:"id"`
+	Type        string   `yaml:"type"`
+	Signal      string   `yaml:"signal,omitempty"`
+	Field       string   `yaml:"field,omitempty"`
+	Operation   string   `yaml:"operation,omitempty"`
+	AlertID     string   `yaml:"alert_id,omitempty"`
+	Timeout     string   `yaml:"timeout,omitempty"`
+	Filter      string   `yaml:"filter,omitempty"`
+	Filters     []string `yaml:"filters,omitempty"`
+	SourcePath  string   `yaml:"source_path,omitempty"`
+	SourcePaths []string `yaml:"source_paths,omitempty"`
+	Consumers   []string `yaml:"consumers"`
 }
 
 func New(service, release string) Contract {
 	return Contract{APIVersion: APIVersion, Service: service, Release: release}
+}
+
+func LoadYAML(reader io.Reader) (Contract, error) {
+	decoder := yaml.NewDecoder(reader)
+	decoder.KnownFields(true)
+	var contract Contract
+	if err := decoder.Decode(&contract); err != nil {
+		return Contract{}, fmt.Errorf("%w: decode YAML: %v", ErrInvalidContract, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return Contract{}, fmt.Errorf("%w: multiple YAML documents", ErrInvalidContract)
+		}
+		return Contract{}, fmt.Errorf("%w: decode YAML: %v", ErrInvalidContract, err)
+	}
+	contract.Normalize()
+	if err := contract.Validate(); err != nil {
+		return Contract{}, err
+	}
+	return contract, nil
 }
 
 func (c Contract) Validate() error {
@@ -141,6 +165,10 @@ func (c Contract) Validate() error {
 		case "alert_must_fire":
 			if check.AlertID == "" || check.Timeout == "" {
 				return contractError(path, "alert_id and timeout are required")
+			}
+			timeout, err := time.ParseDuration(check.Timeout)
+			if err != nil || timeout <= 0 {
+				return contractError(path+".timeout", "must be a positive duration")
 			}
 		default:
 			return contractError(path+".type", "unsupported requirement type")
