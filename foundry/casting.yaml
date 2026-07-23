@@ -1,0 +1,37 @@
+apiVersion: v1alpha1
+kind: Installation
+metadata:
+  name: telemetry-guardian
+spec:
+  deployment:
+    mode: docker
+    flavor: compose
+  patches:
+    - target: deployment/compose.yaml
+      operations:
+        - op: replace
+          path: /services/ingester/ports/0
+          value: "14317:4317"
+        - op: replace
+          path: /services/ingester/ports/1
+          value: "14318:4318"
+        - op: add
+          path: /services/ingester/ports/-
+          value: "13134:13133"
+        - op: replace
+          path: /services/ingester/command/1
+          value: |
+            /signoz-otel-collector migrate sync check &&
+            /signoz-otel-collector --config=/etc/otel-collector-config.yaml
+        - op: replace
+          path: /services/telemetry-guardian-signoz-0/ports/0
+          value: "18080:8080"
+        - op: add
+          path: /services/telemetry-guardian-signoz-0/environment/-
+          value: "SIGNOZ_TOKENIZER_JWT_SECRET=${SIGNOZ_TOKENIZER_JWT_SECRET:?set by scripts/env/up.sh}"
+        - op: add
+          path: /services/telemetry-guardian-signoz-0/environment/-
+          value: "SIGNOZ_RULER_EVAL__DELAY=0s"
+        - op: add
+          path: /services/telemetry-guardian-signoz-0/environment/-
+          value: "RULES_EVAL_DELAY=0s"

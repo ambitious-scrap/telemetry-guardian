@@ -2,11 +2,11 @@
 
 ## Current phase
 
-- Phase: 0 — specification freeze and architecture
+- Phase: 1 — Foundry environment and deterministic demo application
 - Owner: Codex implementation
-- Branch: `phase/0-bootstrap-architecture`
-- State: Phase 0 acceptance passed; external review pending
-- Scope: frozen to the protected MVP in the two root authority documents
+- Branch: `phase/1-foundry-demo`
+- State: acceptance passed; awaiting external review
+- Scope: Foundry, demo variants, deterministic load/fault, seeded resources, and Phase 1 acceptance only
 
 ## Authority
 
@@ -44,7 +44,23 @@ read-only dashboard, alert, and service list operations. Each returned content
 plus structured data and pagination; all data arrays were empty. No credentials
 or resource values were recorded.
 
+## Phase 1 empirical findings
+
+- Foundry `v0.2.16` generates an isolated Docker Compose deployment from the
+  committed casting and lock files.
+- SigNoz `v0.133.0` accepts OTLP/HTTP JSON trace and log IDs as hexadecimal
+  strings; base64 IDs are rejected.
+- Dashboard, channel, and alert creation use the observed authenticated
+  `/api/v1/dashboards`, `/api/v1/channels`, and `/api/v2/rules` resource shapes.
+- The test environment sets the ruler evaluation delay to zero and uses a
+  90-second alert window so SigNoz's notification group wait can complete.
+- Foundry's OpAMP-managed default config intermittently replaced ingestion
+  pipelines with `nop`; the isolated demo runs the generated static collector
+  config directly because OpAMP fleet management is outside MVP scope.
+- `scripts/accept/phase1.sh` and `make accept-phase1` each passed three
+  consecutive healthy/broken scenarios with clean teardown.
+
 ## Deferred work
 
-All product code, Foundry resources, fixtures, API adapters, contract mining,
-verification, evidence, CI, and UI remain assigned to later phases.
+SigNoz adapter, contract mining, verification, evidence, CI, blast graph, and
+product UI remain assigned to later phases.

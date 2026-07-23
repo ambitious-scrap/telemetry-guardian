@@ -16,3 +16,5 @@ coverage/
 *.test
 /guardian
 /verdict.json
+/.run/
+/foundry/pours/
