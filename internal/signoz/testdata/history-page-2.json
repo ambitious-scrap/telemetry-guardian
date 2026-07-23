@@ -1,0 +1,7 @@
+{
+  "status": "success",
+  "data": {
+    "items": [{"id": "history-event-2", "state": "inactive", "timestamp": "1700000060000", "createdAt": "2023-11-14T22:14:20Z"}],
+    "total": 2
+  }
+}

@@ -2,11 +2,11 @@
 
 ## Current phase
 
-- Phase: 1 — Foundry environment and deterministic demo application
+- Phase: 2 — Empirically verified SigNoz adapter
 - Owner: Codex implementation
-- Branch: `phase/1-foundry-demo`
+- Branch: `phase/2-signoz-adapter`
 - State: acceptance passed; awaiting external review
-- Scope: Foundry, demo variants, deterministic load/fault, seeded resources, and Phase 1 acceptance only
+- Scope: typed SigNoz HTTP boundary, fixture fake, sanitized fixtures, empirical API notes, and Phase 2 acceptance only
 
 ## Authority
 
@@ -60,7 +60,26 @@ or resource values were recorded.
 - `scripts/accept/phase1.sh` and `make accept-phase1` each passed three
   consecutive healthy/broken scenarios with clean teardown.
 
+## Phase 2 empirical findings
+
+- Authenticated dashboard retrieval uses `GET /api/v1/dashboards/{id}` and
+  alert retrieval uses `GET /api/v2/rules/{id}` with a bearer token.
+- Builder, trace, and log queries use `POST /api/v5/query_range` with the
+  observed Unix-millisecond `time_series` request and `compositeQuery` builder
+  shape. A valid empty `results` or `aggregations: null` response is not an
+  adapter error.
+- Alert history uses
+  `GET /api/v2/rules/{id}/history/timeline` with `start`, `end`, `limit`,
+  `order`, `state`, `filterExpression`, and `cursor`; returned cursors are
+  preserved for explicit page follow-up.
+- Missing bearer, missing resources, and invalid query fields were observed as
+  401, 404, and 400 responses respectively. Forbidden, malformed, timeout, and
+  cancellation behavior is covered by offline transport tests.
+- `internal/signoz/API.md`, fixture-backed fake tests, and the focused
+  `scripts/accept/phase2.sh` acceptance path passed against the Phase 1
+  instance without recording credentials or raw telemetry.
+
 ## Deferred work
 
-SigNoz adapter, contract mining, verification, evidence, CI, blast graph, and
-product UI remain assigned to later phases.
+Contract mining, verification, evidence, CI, blast graph, and product UI remain
+assigned to later phases.

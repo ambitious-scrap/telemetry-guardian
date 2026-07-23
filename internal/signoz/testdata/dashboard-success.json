@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "data": {
+    "id": "dashboard-fixture-id",
+    "webUrl": "https://signoz.example/dashboards/dashboard-fixture-id",
+    "data": {
+      "title": "Checkout overview",
+      "description": "Sanitized dashboard fixture",
+      "widgets": [
+        {
+          "id": "cart-value-panel",
+          "title": "Cart value",
+          "description": "Sanitized panel fixture",
+          "panelTypes": "graph",
+          "query": {
+            "queryType": "builder",
+            "builder": {
+              "queryData": [
+                {
+                  "queryName": "A",
+                  "dataSource": "traces",
+                  "aggregateOperator": "sum",
+                  "aggregations": [{"expression": "sum(cart.value)"}],
+                  "filter": {"expression": "service.name = 'checkout'"},
+                  "stepInterval": 10,
+                  "disabled": false,
+                  "legend": "cart.value"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
