@@ -150,32 +150,50 @@ type DashboardWidget struct {
 	Title       string
 	Description string
 	PanelType   string
+	SourcePath  string
 	Query       DashboardQuery
 }
 
 type DashboardQuery struct {
-	QueryType string
-	Builder   BuilderQuery
+	QueryType        string
+	Builder          BuilderQuery
+	UnsupportedNodes []string
 }
 
 type BuilderQuery struct {
-	QueryData []QuerySpec
+	QueryData        []QuerySpec
+	UnsupportedNodes []string
 }
 
 type QuerySpec struct {
 	Name              string
+	NodeType          string
 	Signal            string
 	DataSource        string
 	AggregateOperator string
 	Aggregations      []Aggregation
 	Filter            string
+	FilterSourcePath  string
+	FilterDataType    string
 	StepInterval      int
 	Disabled          bool
 	Legend            string
+	SourcePath        string
+	FieldDataType     string
+	GroupBy           []QueryField
+	UnsupportedNodes  []string
 }
 
 type Aggregation struct {
-	Expression string
+	Expression    string
+	SourcePath    string
+	FieldDataType string
+}
+
+type QueryField struct {
+	Name          string
+	FieldContext  string
+	FieldDataType string
 }
 
 type Alert struct {
@@ -201,9 +219,10 @@ type AlertCondition struct {
 }
 
 type CompositeQuery struct {
-	QueryType string
-	PanelType string
-	Queries   []QuerySpec
+	QueryType        string
+	PanelType        string
+	Queries          []QuerySpec
+	UnsupportedNodes []string
 }
 
 type Threshold struct {
@@ -566,12 +585,16 @@ type dashboardWidgetWire struct {
 }
 
 type dashboardQueryWire struct {
-	QueryType string           `json:"queryType"`
-	Builder   builderQueryWire `json:"builder"`
+	QueryType     string            `json:"queryType"`
+	Builder       builderQueryWire  `json:"builder"`
+	PromQL        []json.RawMessage `json:"promql"`
+	ClickHouseSQL []json.RawMessage `json:"clickhouse_sql"`
 }
 
 type builderQueryWire struct {
-	QueryData []querySpecWire `json:"queryData"`
+	QueryData          []querySpecWire   `json:"queryData"`
+	QueryFormulas      []json.RawMessage `json:"queryFormulas"`
+	QueryTraceOperator []json.RawMessage `json:"queryTraceOperator"`
 }
 
 type querySpecWire struct {
@@ -585,22 +608,49 @@ type querySpecWire struct {
 	StepInterval      int               `json:"stepInterval"`
 	Disabled          bool              `json:"disabled"`
 	Legend            string            `json:"legend,omitempty"`
+	FieldDataType     string            `json:"fieldDataType,omitempty"`
+	GroupBy           []queryFieldWire  `json:"groupBy"`
+	OrderBy           []json.RawMessage `json:"orderBy"`
+	Having            []json.RawMessage `json:"having"`
+	Functions         []json.RawMessage `json:"functions"`
 }
 
 type filterWire struct {
-	Expression string `json:"expression"`
+	Expression    string `json:"expression"`
+	FieldDataType string `json:"fieldDataType,omitempty"`
+	DataType      string `json:"dataType,omitempty"`
 }
 
 type aggregationWire struct {
-	Expression string `json:"expression"`
+	Expression    string `json:"expression"`
+	FieldDataType string `json:"fieldDataType,omitempty"`
+	DataType      string `json:"dataType,omitempty"`
+}
+
+type queryFieldWire struct {
+	Name          string `json:"name"`
+	FieldContext  string `json:"fieldContext"`
+	FieldDataType string `json:"fieldDataType"`
 }
 
 func (wire dashboardWire) dashboard() Dashboard {
 	widgets := make([]DashboardWidget, 0, len(wire.Data.Widgets))
-	for _, widget := range wire.Data.Widgets {
+	for index, widget := range wire.Data.Widgets {
+		widgetPath := fmt.Sprintf("$.data.data.widgets[%d]", index)
+		builderPath := widgetPath + ".query.builder"
+		builder := mapBuilderQuery(widget.Query.Builder, builderPath)
+		unsupported := make([]string, 0, 2)
+		if len(widget.Query.PromQL) > 0 {
+			unsupported = append(unsupported, "promql")
+		}
+		if len(widget.Query.ClickHouseSQL) > 0 {
+			unsupported = append(unsupported, "clickhouse_sql")
+		}
+		unsupported = append(unsupported, builder.UnsupportedNodes...)
 		widgets = append(widgets, DashboardWidget{
 			ID: widget.ID, Title: widget.Title, Description: widget.Description, PanelType: widget.PanelType,
-			Query: DashboardQuery{QueryType: widget.Query.QueryType, Builder: BuilderQuery{QueryData: mapQuerySpecs(widget.Query.Builder.QueryData)}},
+			SourcePath: widgetPath,
+			Query:      DashboardQuery{QueryType: widget.Query.QueryType, Builder: builder, UnsupportedNodes: uniqueStrings(unsupported)},
 		})
 	}
 	deepLink := wire.WebURL
@@ -658,8 +708,9 @@ type thresholdWire struct {
 
 func (wire alertWire) alert() Alert {
 	queries := make([]QuerySpec, 0, len(wire.Condition.CompositeQuery.Queries))
-	for _, query := range wire.Condition.CompositeQuery.Queries {
-		queries = append(queries, mapQuerySpec(query.Spec))
+	for index, query := range wire.Condition.CompositeQuery.Queries {
+		path := fmt.Sprintf("$.data.condition.compositeQuery.queries[%d].spec", index)
+		queries = append(queries, mapQuerySpecAt(query.Spec, path, query.Type))
 	}
 	thresholds := make([]Threshold, 0, len(wire.Condition.Thresholds.Spec))
 	for _, threshold := range wire.Condition.Thresholds.Spec {
@@ -679,27 +730,105 @@ func (wire alertWire) alert() Alert {
 }
 
 func mapQuerySpecs(specs []querySpecWire) []QuerySpec {
+	return mapQuerySpecsAt(specs, "", "")
+}
+
+func mapQuerySpecsAt(specs []querySpecWire, basePath, nodeType string) []QuerySpec {
 	result := make([]QuerySpec, 0, len(specs))
-	for _, spec := range specs {
-		result = append(result, mapQuerySpec(spec))
+	for index, spec := range specs {
+		path := ""
+		if basePath != "" {
+			path = fmt.Sprintf("%s[%d]", basePath, index)
+		}
+		result = append(result, mapQuerySpecAt(spec, path, nodeType))
 	}
 	return result
 }
 
 func mapQuerySpec(spec querySpecWire) QuerySpec {
+	return mapQuerySpecAt(spec, "", "")
+}
+
+func mapQuerySpecAt(spec querySpecWire, sourcePath, nodeType string) QuerySpec {
 	name := spec.Name
 	if name == "" {
 		name = spec.QueryName
 	}
 	aggregations := make([]Aggregation, 0, len(spec.Aggregations))
-	for _, aggregation := range spec.Aggregations {
-		aggregations = append(aggregations, Aggregation{Expression: aggregation.Expression})
+	for index, aggregation := range spec.Aggregations {
+		aggregationPath := ""
+		if sourcePath != "" {
+			aggregationPath = fmt.Sprintf("%s.aggregations[%d].expression", sourcePath, index)
+		}
+		fieldDataType := aggregation.FieldDataType
+		if fieldDataType == "" {
+			fieldDataType = aggregation.DataType
+		}
+		aggregations = append(aggregations, Aggregation{Expression: aggregation.Expression, SourcePath: aggregationPath, FieldDataType: fieldDataType})
+	}
+	filterPath := ""
+	if sourcePath != "" {
+		filterPath = sourcePath + ".filter.expression"
+	}
+	groupBy := make([]QueryField, 0, len(spec.GroupBy))
+	for _, field := range spec.GroupBy {
+		groupBy = append(groupBy, QueryField{Name: field.Name, FieldContext: field.FieldContext, FieldDataType: field.FieldDataType})
+	}
+	unsupported := make([]string, 0, 3)
+	if len(spec.GroupBy) > 0 {
+		unsupported = append(unsupported, "groupBy")
+	}
+	if len(spec.OrderBy) > 0 {
+		unsupported = append(unsupported, "orderBy")
+	}
+	if len(spec.Having) > 0 {
+		unsupported = append(unsupported, "having")
+	}
+	if len(spec.Functions) > 0 {
+		unsupported = append(unsupported, "functions")
 	}
 	return QuerySpec{
-		Name: name, Signal: spec.Signal, DataSource: spec.DataSource, AggregateOperator: spec.AggregateOperator,
-		Aggregations: aggregations, Filter: spec.Filter.Expression, StepInterval: spec.StepInterval,
-		Disabled: spec.Disabled, Legend: spec.Legend,
+		Name: name, NodeType: nodeType, Signal: spec.Signal, DataSource: spec.DataSource, AggregateOperator: spec.AggregateOperator,
+		Aggregations: aggregations, Filter: spec.Filter.Expression, FilterSourcePath: filterPath, FilterDataType: firstNonEmpty(spec.Filter.FieldDataType, spec.Filter.DataType), StepInterval: spec.StepInterval,
+		Disabled: spec.Disabled, Legend: spec.Legend, SourcePath: sourcePath, FieldDataType: spec.FieldDataType,
+		GroupBy: groupBy, UnsupportedNodes: unsupported,
 	}
+}
+
+func mapBuilderQuery(wire builderQueryWire, basePath string) BuilderQuery {
+	unsupported := make([]string, 0, 2)
+	if len(wire.QueryFormulas) > 0 {
+		unsupported = append(unsupported, "queryFormulas")
+	}
+	if len(wire.QueryTraceOperator) > 0 {
+		unsupported = append(unsupported, "queryTraceOperator")
+	}
+	return BuilderQuery{
+		QueryData:        mapQuerySpecsAt(wire.QueryData, basePath+".queryData", "builder_query"),
+		UnsupportedNodes: uniqueStrings(unsupported),
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type queryRequestWire struct {

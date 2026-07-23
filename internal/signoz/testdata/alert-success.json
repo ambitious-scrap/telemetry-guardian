@@ -3,7 +3,7 @@
   "data": {
     "id": "alert-fixture-id",
     "webUrl": "https://signoz.example/alerts/alert-fixture-id",
-    "alert": "checkout-timeout",
+    "alert": "telemetry-guardian-payment-timeout",
     "alertType": "TRACES_BASED_ALERT",
     "ruleType": "threshold_rule",
     "state": "inactive",
@@ -23,7 +23,7 @@
               "signal": "traces",
               "stepInterval": 5,
               "disabled": false,
-              "filter": {"expression": "service.name = 'checkout' AND error.type = 'timeout'"},
+              "filter": {"expression": "service.name = 'checkout' AND run.id = '__RUN_ID__' AND error.type = 'payment_timeout'"},
               "aggregations": [{"expression": "count()"}]
             }
           }
@@ -43,6 +43,6 @@
       }
     },
     "labels": {"severity": "critical"},
-    "annotations": {"description": "Sanitized alert fixture", "summary": "Timeout"}
+    "annotations": {"description": "payment.authorize emitted error.type=payment_timeout", "summary": "Payment timeout"}
   }
 }
