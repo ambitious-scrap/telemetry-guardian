@@ -5,6 +5,7 @@
 .claude/
 .codex/
 .memsearch/
+.serena/
 .idea/
 .vscode/
 node_modules/
