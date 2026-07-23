@@ -1,0 +1,8 @@
+{
+  "status": "success",
+  "data": {
+    "items": [{"id": "history-event-1", "state": "firing", "timestamp": 1700000000000, "createdAt": "2023-11-14T22:13:20Z"}],
+    "total": 2,
+    "nextCursor": "history-cursor-2"
+  }
+}

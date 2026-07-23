@@ -1,0 +1,48 @@
+{
+  "status": "success",
+  "data": {
+    "id": "alert-fixture-id",
+    "webUrl": "https://signoz.example/alerts/alert-fixture-id",
+    "alert": "checkout-timeout",
+    "alertType": "TRACES_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "state": "inactive",
+    "evalWindow": "90s",
+    "frequency": "5s",
+    "version": "v5",
+    "schemaVersion": "v2alpha1",
+    "condition": {
+      "compositeQuery": {
+        "queryType": "builder",
+        "panelType": "graph",
+        "queries": [
+          {
+            "type": "builder_query",
+            "spec": {
+              "name": "A",
+              "signal": "traces",
+              "stepInterval": 5,
+              "disabled": false,
+              "filter": {"expression": "service.name = 'checkout' AND error.type = 'timeout'"},
+              "aggregations": [{"expression": "count()"}]
+            }
+          }
+        ]
+      },
+      "selectedQueryName": "A",
+      "thresholds": {
+        "kind": "basic",
+        "spec": [{
+          "name": "critical",
+          "target": 0,
+          "targetUnit": "",
+          "matchType": "at_least_once",
+          "op": "above",
+          "channels": ["fixture-channel"]
+        }]
+      }
+    },
+    "labels": {"severity": "critical"},
+    "annotations": {"description": "Sanitized alert fixture", "summary": "Timeout"}
+  }
+}
