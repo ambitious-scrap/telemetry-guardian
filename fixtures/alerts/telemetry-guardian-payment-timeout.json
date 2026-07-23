@@ -1,0 +1,61 @@
+{
+  "alert": "telemetry-guardian-payment-timeout",
+  "alertType": "TRACES_BASED_ALERT",
+  "ruleType": "threshold_rule",
+  "version": "v5",
+  "schemaVersion": "v2alpha1",
+  "evalWindow": "90s",
+  "frequency": "5s",
+  "condition": {
+    "compositeQuery": {
+      "queryType": "builder",
+      "panelType": "graph",
+      "queries": [
+        {
+          "type": "builder_query",
+          "spec": {
+            "name": "A",
+            "signal": "traces",
+            "stepInterval": 5,
+            "disabled": false,
+            "filter": {
+              "expression": "service.name = 'telemetry-guardian-checkout' AND run.id = '__RUN_ID__' AND error.type = 'payment_timeout'"
+            },
+            "aggregations": [{"expression": "count()"}]
+          }
+        }
+      ]
+    },
+    "selectedQueryName": "A",
+    "alertOnAbsent": false,
+    "requireMinPoints": false,
+    "thresholds": {
+      "kind": "basic",
+      "spec": [
+        {
+          "name": "critical",
+          "target": 0,
+          "targetUnit": "",
+          "matchType": "at_least_once",
+          "op": "above",
+          "channels": ["telemetry-guardian-webhook"]
+        }
+      ]
+    }
+  },
+  "evaluation": {
+    "kind": "rolling",
+    "spec": {"evalWindow": "90s", "frequency": "5s"}
+  },
+  "labels": {"severity": "critical", "project": "telemetry-guardian"},
+  "annotations": {
+    "description": "payment.authorize emitted error.type=payment_timeout",
+    "summary": "Telemetry Guardian deterministic payment timeout"
+  },
+  "notificationSettings": {
+    "groupBy": [],
+    "renotify": {"enabled": false, "interval": "30m", "alertStates": []},
+    "usePolicy": false
+  },
+  "disabled": false
+}

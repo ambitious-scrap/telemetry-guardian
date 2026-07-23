@@ -1,0 +1,44 @@
+{
+  "title": "telemetry-guardian-checkout",
+  "description": "Telemetry Guardian checkout cart value by run",
+  "tags": ["telemetry-guardian"],
+  "layout": [
+    {"h": 8, "i": "telemetry-guardian-cart-value", "w": 12, "x": 0, "y": 0}
+  ],
+  "variables": {},
+  "widgets": [
+    {
+      "id": "telemetry-guardian-cart-value",
+      "title": "Checkout cart value",
+      "description": "Depends on cart.value from payment.authorize spans",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "traces",
+              "aggregateOperator": "sum",
+              "aggregations": [{"expression": "sum(cart.value)"}],
+              "filter": {
+                "expression": "service.name = 'telemetry-guardian-checkout' AND run.id = '__RUN_ID__'"
+              },
+              "stepInterval": 10,
+              "disabled": false,
+              "groupBy": [],
+              "orderBy": [],
+              "having": [],
+              "functions": [],
+              "legend": "cart.value"
+            }
+          ],
+          "queryFormulas": [],
+          "queryTraceOperator": []
+        },
+        "promql": [],
+        "clickhouse_sql": []
+      }
+    }
+  ]
+}
