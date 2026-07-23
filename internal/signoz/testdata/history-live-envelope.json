@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": {
+    "items": [
+      {
+        "ruleId": "alert-fixture-id",
+        "ruleName": "telemetry-guardian payment timeout",
+        "overallState": "firing",
+        "overallStateChanged": true,
+        "state": "firing",
+        "stateChanged": true,
+        "unixMilli": 1700000000000,
+        "labels": {},
+        "fingerprint": "fixture-fingerprint",
+        "value": 1
+      }
+    ],
+    "total": 1
+  }
+}

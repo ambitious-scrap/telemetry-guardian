@@ -16,6 +16,7 @@ type FakeClient struct {
 	TraceResult     QueryResult
 	LogResult       QueryResult
 	HistoryResult   AlertHistory
+	HistoryRequests []AlertHistoryRequest
 
 	DashboardError error
 	AlertError     error
@@ -155,6 +156,7 @@ func (f *FakeClient) SearchLogs(ctx context.Context, request SearchRequest) (Que
 }
 
 func (f *FakeClient) GetAlertHistory(ctx context.Context, id string, request AlertHistoryRequest) (AlertHistory, error) {
+	f.HistoryRequests = append(f.HistoryRequests, request)
 	if id == "" {
 		return AlertHistory{}, invalidRequest("GetAlertHistory", "alert id")
 	}
