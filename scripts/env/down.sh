@@ -10,5 +10,6 @@ if [ -f "$compose" ]; then
 	export SIGNOZ_TOKENIZER_JWT_SECRET
 	docker compose -f "$compose" -p telemetry-guardian down --volumes --remove-orphans --timeout 20
 fi
-rm -f "$RUN_DIR"/*
+# Only runtime files are disposable; preserved demo evidence directories survive.
+find "$RUN_DIR" -mindepth 1 -maxdepth 1 -type f -exec rm -f {} +
 echo "Telemetry Guardian environment removed"
