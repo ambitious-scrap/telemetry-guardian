@@ -517,7 +517,12 @@ func invalidRequest(operation, code string) error {
 }
 
 func invalidResponse(operation string, cause error) error {
-	return &Error{Kind: ErrorInvalidResponse, Operation: operation, cause: cause}
+	code := ""
+	var decodeErr *wireDecodeError
+	if errors.As(cause, &decodeErr) {
+		code = decodeErr.path
+	}
+	return &Error{Kind: ErrorInvalidResponse, Operation: operation, Code: code, cause: cause}
 }
 
 func timeoutError(operation string, cause error) error {
@@ -571,6 +576,46 @@ type wireAPIError struct {
 	Message string `json:"message"`
 }
 
+// wireDecodeError identifies the dependency-bearing structure that rejected a
+// response without exposing the unknown field or any telemetry value.
+type wireDecodeError struct {
+	path  string
+	cause error
+}
+
+func (e *wireDecodeError) Error() string {
+	if e.path == "" {
+		return "invalid dependency query structure"
+	}
+	return "invalid dependency query structure at " + e.path
+}
+
+func (e *wireDecodeError) Unwrap() error { return e.cause }
+
+func decodeDependencyJSON(data []byte, output any, path string) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
+		var nested *wireDecodeError
+		if errors.As(err, &nested) {
+			return err
+		}
+		return &wireDecodeError{path: path, cause: err}
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = errors.New("trailing JSON content")
+		}
+		var nested *wireDecodeError
+		if errors.As(err, &nested) {
+			return err
+		}
+		return &wireDecodeError{path: path, cause: err}
+	}
+	return nil
+}
+
 type dashboardWire struct {
 	ID     string               `json:"id"`
 	WebURL string               `json:"webUrl"`
@@ -599,16 +644,37 @@ type dashboardQueryWire struct {
 	ClickHouseSQL []json.RawMessage `json:"clickhouse_sql"`
 }
 
+func (wire *dashboardQueryWire) UnmarshalJSON(data []byte) error {
+	type plain dashboardQueryWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.data.widgets[*].query"); err != nil {
+		return err
+	}
+	*wire = dashboardQueryWire(value)
+	return nil
+}
+
 type builderQueryWire struct {
 	QueryData          []querySpecWire   `json:"queryData"`
 	QueryFormulas      []json.RawMessage `json:"queryFormulas"`
 	QueryTraceOperator []json.RawMessage `json:"queryTraceOperator"`
 }
 
+func (wire *builderQueryWire) UnmarshalJSON(data []byte) error {
+	type plain builderQueryWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.query.builder"); err != nil {
+		return err
+	}
+	*wire = builderQueryWire(value)
+	return nil
+}
+
 type querySpecWire struct {
 	Name              string            `json:"name"`
 	QueryName         string            `json:"queryName,omitempty"`
 	Signal            string            `json:"signal"`
+	Source            string            `json:"source,omitempty"`
 	DataSource        string            `json:"dataSource,omitempty"`
 	AggregateOperator string            `json:"aggregateOperator,omitempty"`
 	Aggregations      []aggregationWire `json:"aggregations"`
@@ -623,10 +689,30 @@ type querySpecWire struct {
 	Functions         []json.RawMessage `json:"functions"`
 }
 
+func (wire *querySpecWire) UnmarshalJSON(data []byte) error {
+	type plain querySpecWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.query.spec"); err != nil {
+		return err
+	}
+	*wire = querySpecWire(value)
+	return nil
+}
+
 type filterWire struct {
 	Expression    string `json:"expression"`
 	FieldDataType string `json:"fieldDataType,omitempty"`
 	DataType      string `json:"dataType,omitempty"`
+}
+
+func (wire *filterWire) UnmarshalJSON(data []byte) error {
+	type plain filterWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.query.filter"); err != nil {
+		return err
+	}
+	*wire = filterWire(value)
+	return nil
 }
 
 type aggregationWire struct {
@@ -635,10 +721,30 @@ type aggregationWire struct {
 	DataType      string `json:"dataType,omitempty"`
 }
 
+func (wire *aggregationWire) UnmarshalJSON(data []byte) error {
+	type plain aggregationWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.query.aggregations[*]"); err != nil {
+		return err
+	}
+	*wire = aggregationWire(value)
+	return nil
+}
+
 type queryFieldWire struct {
 	Name          string `json:"name"`
 	FieldContext  string `json:"fieldContext"`
 	FieldDataType string `json:"fieldDataType"`
+}
+
+func (wire *queryFieldWire) UnmarshalJSON(data []byte) error {
+	type plain queryFieldWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.query.groupBy[*]"); err != nil {
+		return err
+	}
+	*wire = queryFieldWire(value)
+	return nil
 }
 
 func (wire dashboardWire) dashboard() Dashboard {
@@ -690,10 +796,30 @@ type conditionWire struct {
 	Thresholds        thresholdSetWire   `json:"thresholds"`
 }
 
+func (wire *conditionWire) UnmarshalJSON(data []byte) error {
+	type plain conditionWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.condition"); err != nil {
+		return err
+	}
+	*wire = conditionWire(value)
+	return nil
+}
+
 type compositeQueryWire struct {
 	QueryType string           `json:"queryType"`
 	PanelType string           `json:"panelType"`
 	Queries   []alertQueryWire `json:"queries"`
+}
+
+func (wire *compositeQueryWire) UnmarshalJSON(data []byte) error {
+	type plain compositeQueryWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.condition.compositeQuery"); err != nil {
+		return err
+	}
+	*wire = compositeQueryWire(value)
+	return nil
 }
 
 type alertQueryWire struct {
@@ -701,17 +827,29 @@ type alertQueryWire struct {
 	Spec querySpecWire `json:"spec"`
 }
 
+func (wire *alertQueryWire) UnmarshalJSON(data []byte) error {
+	type plain alertQueryWire
+	var value plain
+	if err := decodeDependencyJSON(data, &value, "$.data.condition.compositeQuery.queries[*]"); err != nil {
+		return err
+	}
+	*wire = alertQueryWire(value)
+	return nil
+}
+
 type thresholdSetWire struct {
+	Kind string          `json:"kind"`
 	Spec []thresholdWire `json:"spec"`
 }
 
 type thresholdWire struct {
-	Name       string   `json:"name"`
-	Target     float64  `json:"target"`
-	TargetUnit string   `json:"targetUnit"`
-	MatchType  string   `json:"matchType"`
-	Operation  string   `json:"op"`
-	Channels   []string `json:"channels"`
+	Name           string          `json:"name"`
+	Target         float64         `json:"target"`
+	TargetUnit     string          `json:"targetUnit"`
+	RecoveryTarget json.RawMessage `json:"recoveryTarget"`
+	MatchType      string          `json:"matchType"`
+	Operation      string          `json:"op"`
+	Channels       []string        `json:"channels"`
 }
 
 func (wire alertWire) alert() Alert {
@@ -796,7 +934,7 @@ func mapQuerySpecAt(spec querySpecWire, sourcePath, nodeType string) QuerySpec {
 		unsupported = append(unsupported, "functions")
 	}
 	return QuerySpec{
-		Name: name, NodeType: nodeType, Signal: spec.Signal, DataSource: spec.DataSource, AggregateOperator: spec.AggregateOperator,
+		Name: name, NodeType: nodeType, Signal: spec.Signal, DataSource: firstNonEmpty(spec.DataSource, spec.Source), AggregateOperator: spec.AggregateOperator,
 		Aggregations: aggregations, Filter: spec.Filter.Expression, FilterSourcePath: filterPath, FilterDataType: firstNonEmpty(spec.Filter.FieldDataType, spec.Filter.DataType), StepInterval: spec.StepInterval,
 		Disabled: spec.Disabled, Legend: spec.Legend, SourcePath: sourcePath, FieldDataType: spec.FieldDataType,
 		GroupBy: groupBy, UnsupportedNodes: unsupported,

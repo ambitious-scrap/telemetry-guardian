@@ -104,6 +104,47 @@ func TestCanonicalMiningIsByteStable(t *testing.T) {
 	}
 }
 
+func TestFilterParserRejectsUnconsumedAndDuplicateTerms(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter string
+	}{
+		{name: "malformed extra term", filter: "service.name = 'checkout' AND run.id = '__RUN_ID__' AND"},
+		{name: "duplicate field", filter: "service.name = 'checkout' AND service.name = 'checkout' AND run.id = '__RUN_ID__'"},
+		{name: "conflicting duplicate", filter: "service.name = 'checkout' AND service.name = 'other' AND run.id = '__RUN_ID__'"},
+		{name: "unsupported operator", filter: "service.name != 'checkout' AND run.id = '__RUN_ID__'"},
+		{name: "unquoted value", filter: "service.name = checkout AND run.id = '__RUN_ID__'"},
+		{name: "malformed quoting", filter: "service.name = 'checkout AND run.id = '__RUN_ID__'"},
+		{name: "trailing text", filter: "service.name = 'checkout' trailing"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := fixtureFake(t)
+			fake.DashboardResult.Widgets[0].Query.Builder.QueryData[0].Filter = test.filter
+			_, err := Mine(context.Background(), fake, fixtureConfig)
+			if err == nil || !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("filter error = %v, want invalid input", err)
+			}
+			if !strings.Contains(err.Error(), ".filter.expression") || strings.Contains(err.Error(), test.filter) {
+				t.Fatalf("filter error safety/path = %v", err)
+			}
+		})
+	}
+}
+
+func TestFilterParserNormalizesValidTermOrder(t *testing.T) {
+	fake := fixtureFake(t)
+	fake.DashboardResult.Widgets[0].Query.Builder.QueryData[0].Filter = "run.id = '__RUN_ID__' AND service.name = 'checkout'"
+	contract, err := Mine(context.Background(), fake, fixtureConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := findCheck(contract, requiredCartValueID())
+	if check.Filter != "service.name = 'checkout' AND run.id = '__RUN_ID__'" {
+		t.Fatalf("normalized filter = %q", check.Filter)
+	}
+}
+
 func TestMiningDeduplicatesRequirementsAndRetainsConsumers(t *testing.T) {
 	fake := fixtureFake(t)
 	duplicate := fake.DashboardResult.Widgets[0]

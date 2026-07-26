@@ -651,3 +651,20 @@ incomplete contract, a semantically false check result, stale-data PASS, or a
 false healthy report. After those are corrected and their focused tests pass,
 the human should reassess P1s and configure hosted CI. Do not begin stretch
 work while this decision remains no-go.
+
+## 14. P0 resolution pass
+
+The following four approved P0 corrections were implemented without changing
+the protected Phase 6 path. The original findings and all P1/P2 classifications
+above remain unchanged.
+
+| Finding | Resolution evidence | Validation | Status |
+|---|---|---|---|
+| P0-1 silently omitted query content | `internal/signoz/client.go` now strictly decodes dependency-bearing query structures while retaining permissive resource metadata; `internal/miner/miner.go` fully consumes supported filter grammar and rejects malformed or duplicate terms. | SigNoz/miner regression tests, canonical golden tests, malformed-filter mutations, sanitized metadata/query fixtures, and focused Phase 3 live mining acceptance. | RESOLVED |
+| P0-2 canonical IDs not bound to semantics | `internal/verifier/verifier.go` validates every canonical ID against its exact type, signal, field/operation, filter, alert ID, and timeout; filters are compared as parsed term sets. | Canonical tuple mutations cover signal, field, operation, alert ID, timeout, service/run/error filters, extras, duplicate/missing IDs; invalid inputs make zero query calls and CLI exit 3. | RESOLVED |
+| P0-3 returned points outside requested window | `internal/verifier/verifier.go` rejects invalid timestamps and counts only inclusive Unix-millisecond window points. | Boundary, mixed, zero-timestamp, stale-positive, healthy/broken/no-load tests and the final Phase 4 acceptance passed. | RESOLVED |
+| P0-4 contradictory verdict aggregate | `internal/evidence/evidence.go` treats empty/unknown states as inconclusive, and `internal/report/report.go` recomputes and validates aggregate state before rendering. | Contradictory PASS/FAIL/INCONCLUSIVE, empty, and unknown-state tests plus CLI no-output/exit-3 coverage passed. | RESOLVED |
+
+The hosted healthy-workflow limitation remains **PARTIAL** because the
+externally reachable `SIGNOZ_URL` and `SIGNOZ_TOKEN` repository configuration
+is still absent. P1 and P2 findings remain deferred; no stretch work was begun.

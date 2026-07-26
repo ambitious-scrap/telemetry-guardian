@@ -279,7 +279,10 @@ func (c *collector) alert(alert signoz.Alert) error {
 	if err != nil {
 		return err
 	}
-	terms := filterTerms(query.Filter)
+	terms, err := parseFilterTerms(query.Filter, query.FilterSourcePath)
+	if err != nil {
+		return err
+	}
 	if terms[RequiredErrorType] != "payment_timeout" {
 		return invalid(query.FilterSourcePath, "error.type must equal payment_timeout")
 	}
@@ -386,7 +389,10 @@ func scopedFilter(query signoz.QuerySpec, allowed, required []string, sourcePath
 	if !contracts.IsJSONPath(sourcePath) {
 		return "", invalid("filter.source_path", "malformed JSON path")
 	}
-	terms := filterTerms(query.Filter)
+	terms, err := parseFilterTerms(query.Filter, sourcePath)
+	if err != nil {
+		return "", err
+	}
 	if len(terms) == 0 {
 		return "", unsupported(sourcePath, "unsupported filter expression")
 	}
@@ -421,25 +427,89 @@ func scopedFilter(query signoz.QuerySpec, allowed, required []string, sourcePath
 	return strings.Join(parts, " AND "), nil
 }
 
-func filterTerms(expression string) map[string]string {
-	terms := make(map[string]string)
-	for _, rawTerm := range strings.Split(expression, " AND ") {
-		term := strings.TrimSpace(rawTerm)
-		parts := strings.Split(term, " = ")
-		if len(parts) != 2 {
-			continue
-		}
-		field := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
-			continue
-		}
-		if _, exists := terms[field]; exists {
-			continue
-		}
-		terms[field] = value[1 : len(value)-1]
+func parseFilterTerms(expression, sourcePath string) (map[string]string, error) {
+	if strings.TrimSpace(expression) == "" {
+		return nil, invalid(sourcePath, "filter expression is empty")
 	}
-	return terms
+	terms := make(map[string]string)
+	position := 0
+	for {
+		for position < len(expression) && isFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) {
+			return nil, invalid(sourcePath, "filter expression contains an empty term")
+		}
+
+		fieldStart := position
+		for position < len(expression) && !isFilterSpace(expression[position]) && expression[position] != '=' {
+			position++
+		}
+		field := expression[fieldStart:position]
+		if !validFilterField(field) {
+			return nil, invalid(sourcePath, "filter term has an unsupported field or operator")
+		}
+		for position < len(expression) && isFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) || expression[position] != '=' || (position+1 < len(expression) && expression[position+1] == '=') {
+			return nil, invalid(sourcePath, "filter term must use field = 'value'")
+		}
+		position++
+		for position < len(expression) && isFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) || expression[position] != '\'' {
+			return nil, invalid(sourcePath, "filter value must be single-quoted")
+		}
+		position++
+		valueStart := position
+		for position < len(expression) && expression[position] != '\'' {
+			position++
+		}
+		if position >= len(expression) {
+			return nil, invalid(sourcePath, "filter value has malformed quoting")
+		}
+		value := expression[valueStart:position]
+		position++
+		if _, exists := terms[field]; exists {
+			return nil, invalid(sourcePath, "filter contains a duplicate field")
+		}
+		terms[field] = value
+
+		separatorStart := position
+		for position < len(expression) && isFilterSpace(expression[position]) {
+			position++
+		}
+		if position == len(expression) {
+			return terms, nil
+		}
+		if separatorStart == position || !strings.HasPrefix(expression[position:], "AND") || position+3 >= len(expression) || !isFilterSpace(expression[position+3]) {
+			return nil, invalid(sourcePath, "filter has trailing or unsupported expression")
+		}
+		position += 3
+		if position == len(expression) {
+			return nil, invalid(sourcePath, "filter expression contains an empty term")
+		}
+	}
+}
+
+func validFilterField(field string) bool {
+	if field == "" {
+		return false
+	}
+	for _, character := range field {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune("._:-", character) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isFilterSpace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func parseCall(expression, name string) (string, bool) {

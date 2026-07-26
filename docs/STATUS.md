@@ -2,13 +2,13 @@
 
 ## Current phase
 
-- Phase: 7 — Release-candidate review
-- Owner: Codex review pass
-- Branch: `phase/7-release-candidate`
-- State: review pass complete; `docs/reviews/release-candidate.md` records
-  P0/P1/P2 findings and awaits implementation review
-- Scope: review only; no product-code fixes, stretch work, live/demo reruns,
-  or `demo-freeze` tag changes
+- Phase: 7 — P0 hardening
+- Owner: Codex implementation pass
+- Branch: `phase/7-p0-hardening`
+- State: four approved P0 corrections implemented and validated; P1/P2 findings
+  remain deferred for external review
+- Scope: P0 corrections only; no stretch work, Phase 6 demo rerun, or
+  `demo-freeze` tag change
 
 ## Authority
 
@@ -167,3 +167,23 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
 - The hosted Guardian healthy-workflow criterion remains partial because the
   externally reachable `SIGNOZ_URL` variable and `SIGNOZ_TOKEN` secret are not
   configured; this is not classified as a product-code P0.
+
+## Phase 7 P0 hardening
+
+- P0-1 is corrected: dependency-bearing SigNoz query structures reject unknown
+  fields, and miner filters require full-consumption parsing with duplicate and
+  malformed-term rejection; harmless response metadata remains permissive.
+- P0-2 is corrected: verifier canonical IDs are bound to the exact four Phase 4
+  semantic tuples, including service-relative filters and the 60-second alert
+  timeout; invalid tuples return configuration errors before queries start.
+- P0-3 is corrected: query points reject nonpositive timestamps and only points
+  in the inclusive requested Unix-millisecond window contribute to counts.
+- P0-4 is corrected: report construction recomputes the aggregate with
+  `INCONCLUSIVE > FAIL > PASS` precedence and rejects contradictory or unknown
+  verdict states before writing output.
+- Focused package tests, `make fmt-check`, `make lint`, `make test`, shell
+  syntax validation, `scripts/accept/phase3.sh`, and `scripts/accept/phase5.sh`
+  passed. The final single `make accept-phase4` run passed healthy, broken,
+  no-load, and invalid-contract outcomes after one focused timestamp probe.
+- Phase 6 demo and Phase 6 acceptance were not rerun. `demo-freeze` remains
+  unchanged. P1 and P2 review findings remain deferred.

@@ -26,6 +26,17 @@ func TestExitCodePrecedence(t *testing.T) {
 	}
 }
 
+func TestUnknownOrEmptyStatesCannotAggregateHealthy(t *testing.T) {
+	for _, state := range []State{"", "UNKNOWN"} {
+		if got := Aggregate([]CheckResult{{State: state}}); got != Inconclusive {
+			t.Fatalf("state %q aggregated as %s, want %s", state, got, Inconclusive)
+		}
+	}
+	if got := Aggregate(nil); got != Inconclusive {
+		t.Fatalf("empty result aggregate = %s, want %s", got, Inconclusive)
+	}
+}
+
 func TestSecretBearingDeepLinkIsOmitted(t *testing.T) {
 	const secret = "phase4-super-secret"
 	result := CheckResult{

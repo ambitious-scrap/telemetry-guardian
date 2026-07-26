@@ -63,6 +63,9 @@ func NewVerdict(runID, service, release string, start, end time.Time, results []
 }
 
 func Aggregate(results []CheckResult) State {
+	if len(results) == 0 {
+		return Inconclusive
+	}
 	state := Pass
 	for _, result := range results {
 		if result.State == Inconclusive {
@@ -70,6 +73,10 @@ func Aggregate(results []CheckResult) State {
 		}
 		if result.State == Fail {
 			state = Fail
+			continue
+		}
+		if result.State != Pass {
+			return Inconclusive
 		}
 	}
 	return state
