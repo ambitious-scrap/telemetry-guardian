@@ -2,12 +2,12 @@
 
 ## Current phase
 
-- Phase: 4 — Verification engine and evidence semantics
+- Phase: 5 — CI gate and consumer blast graph
 - Owner: Codex implementation
-- Branch: `phase/4-verification-engine`
-- State: acceptance passed; awaiting external review
-- Scope: four canonical checks, evidence-complete verdicts, stable exit codes,
-  bounded polling, stale-state isolation, and Phase 4 acceptance only
+- Branch: `phase/5-ci-blast-graph`
+- State: local implementation complete; acceptance passed; awaiting external review
+- Scope: deterministic CI classification, artifact-preserving report path, and
+  offline consumer blast graph for Phase 5 only
 
 ## Authority
 
@@ -113,4 +113,23 @@ or resource values were recorded.
 
 ## Deferred work
 
-CI, blast graph, reporting, and product UI remain assigned to later phases.
+Phase 6 demo orchestration and all later-phase work remain deferred.
+
+## Phase 5 findings
+
+- CI classification is explicit: exit 0 is `PASS`, exit 1 is
+  `TELEMETRY_CONTRACT_VIOLATION`, exit 2 is
+  `VERIFICATION_INCONCLUSIVE`, and exit 3 is
+  `INVALID_GUARDIAN_CONFIGURATION`. Exit 2 is never rendered as healthy.
+- `scripts/ci/guardian.sh` preserves `verdict.json`, a deterministic HTML
+  report when the verdict is valid, and a Markdown summary on every exit.
+- The report is native HTML/CSS/JavaScript with fixed 1280×720 coordinates,
+  no network dependency, and graph relationships only; it does not imply
+  incident causality.
+- Selected UI direction: dense high-contrast developer evidence console;
+  dark slate semantic tokens; JetBrains Mono technical text with IBM Plex
+  Sans body text; text/icon/border state cues; native keyboard-accessible
+  evidence drawer; visible focus rings; and reduced-motion support.
+- Offline fixtures cover healthy, broken, and inconclusive verdicts. Broken
+  output names the failed requirement, dashboard panel, and alert, and
+  preserves `BREAKS`, `REQUIRED_BY`, and `PART_OF` mappings.

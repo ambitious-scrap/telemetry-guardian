@@ -1,0 +1,14 @@
+{
+  "run_id": "phase5-fixture",
+  "service": "checkout",
+  "release": "candidate-broken",
+  "start": "2026-07-26T10:00:00Z",
+  "end": "2026-07-26T10:01:00Z",
+  "overall_state": "FAIL",
+  "checks": [
+    {"state":"FAIL","requirement_id":"required-field-cart-value","run_id":"phase5-fixture","affected_consumers":["dashboard-panel-telemetry-guardian-checkout-cart-value-panel"],"evidence":{"retrieval":"SearchTraces for cart.value","start":"2026-07-26T10:00:00Z","end":"2026-07-26T10:01:00Z","sample_count":5,"minimum_sample_count":5,"summary":"required field absent","data_quality":"complete"}},
+    {"state":"FAIL","requirement_id":"required-field-error-type","run_id":"phase5-fixture","affected_consumers":["alert-payment-timeout"],"evidence":{"retrieval":"SearchTraces for error.type","start":"2026-07-26T10:00:00Z","end":"2026-07-26T10:01:00Z","sample_count":1,"minimum_sample_count":1,"summary":"required field absent","data_quality":"complete"}},
+    {"state":"PASS","requirement_id":"required-operation-payment-authorize","run_id":"phase5-fixture","affected_consumers":["dashboard-panel-telemetry-guardian-checkout-cart-value-panel","alert-payment-timeout"],"evidence":{"retrieval":"SearchTraces for payment.authorize","start":"2026-07-26T10:00:00Z","end":"2026-07-26T10:01:00Z","sample_count":5,"minimum_sample_count":5,"summary":"requirement observed","data_quality":"complete"}},
+    {"state":"FAIL","requirement_id":"alert-must-fire-payment-timeout","run_id":"phase5-fixture","affected_consumers":["alert-payment-timeout"],"evidence":{"retrieval":"GetAlertHistory firing events","start":"2026-07-26T10:00:00Z","end":"2026-07-26T10:01:00Z","sample_count":0,"minimum_sample_count":1,"summary":"no firing event observed","data_quality":"complete"}}
+  ]
+}
