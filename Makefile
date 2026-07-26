@@ -2,12 +2,12 @@ SHELL := /bin/sh
 RUN_ID ?= phase1-local
 GO_CACHE ?= /private/tmp/telemetry-guardian-gocache
 
-.PHONY: fmt-check lint test signoz-test signoz-integration miner-test integration-test accept-phase0 accept-phase1 accept-phase2 accept-phase3 mine env-up env-ready env-down deploy-healthy deploy-broken seed load fault
+.PHONY: fmt-check lint test signoz-test signoz-integration miner-test verifier-test integration-test accept-phase0 accept-phase1 accept-phase2 accept-phase3 accept-phase4 mine verify env-up env-ready env-down deploy-healthy deploy-broken seed load fault
 
 fmt-check:
 	git diff --check
 	git diff --cached --check
-	@test -z "$$(gofmt -l cmd demo internal/contracts internal/miner internal/signoz 2>/dev/null)"
+	@test -z "$$(gofmt -l cmd demo internal/contracts internal/evidence internal/miner internal/signoz internal/verifier 2>/dev/null)"
 
 lint:
 	sh -n $$(find scripts -name '*.sh' -type f -print)
@@ -21,6 +21,9 @@ signoz-test:
 
 miner-test:
 	GOCACHE=$(GO_CACHE) go test ./internal/contracts ./internal/miner -count=1
+
+verifier-test:
+	GOCACHE=$(GO_CACHE) go test ./internal/contracts ./internal/evidence ./internal/signoz ./internal/verifier -count=1
 
 signoz-integration:
 	./scripts/accept/phase2.sh
@@ -39,8 +42,14 @@ accept-phase2: fmt-check test
 accept-phase3: fmt-check test
 	./scripts/accept/phase3.sh
 
+accept-phase4: fmt-check test
+	./scripts/accept/phase4.sh
+
 mine:
 	GOCACHE=$(GO_CACHE) go run ./cmd/guardian mine
+
+verify:
+	GOCACHE=$(GO_CACHE) go run ./cmd/guardian verify
 
 env-up:
 	./scripts/env/up.sh

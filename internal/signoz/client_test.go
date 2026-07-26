@@ -146,6 +146,33 @@ func TestHTTPClientAlertHistoryPaginationAndEmptyResult(t *testing.T) {
 	}
 }
 
+func TestHTTPClientAlertHistoryLiveEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeFixture(t, response, "testdata/history-live-envelope.json")
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(Config{BaseURL: server.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.UnixMilli(1700000000000)
+	history, err := client.GetAlertHistory(context.Background(), "alert-fixture-id", AlertHistoryRequest{
+		Start: start.Add(-time.Minute),
+		End:   start.Add(time.Minute),
+		State: "firing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history.Total != 1 || len(history.Items) != 1 {
+		t.Fatalf("history = %#v", history)
+	}
+	item := history.Items[0]
+	if item.ID != "alert-fixture-id" || item.State != "firing" || item.Timestamp != start.UnixMilli() {
+		t.Fatalf("history item = %#v", item)
+	}
+}
+
 func TestHTTPClientTypedErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -251,6 +278,62 @@ func TestHTTPClientRejectsInvalidRequests(t *testing.T) {
 	}
 	if _, err := client.GetAlertHistory(context.Background(), "alert-fixture-id", AlertHistoryRequest{}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("invalid history error = %v", err)
+	}
+}
+
+func TestMissingFieldClassificationIsSecretSafe(t *testing.T) {
+	err := statusError("SearchTraces", http.StatusBadRequest, []byte(`{"error":{"code":"invalid_input","message":"key cart.value not found"}}`))
+	if !errors.Is(err, ErrInvalidRequest) || !errors.Is(err, ErrMissingField) {
+		t.Fatalf("classification = %v", err)
+	}
+	if strings.Contains(err.Error(), "cart.value") {
+		t.Fatalf("error exposed server detail: %v", err)
+	}
+}
+
+func TestDashboardAcceptsEmptyObjectHaving(t *testing.T) {
+	var wire dashboardWire
+	payload := `{"id":"dashboard","data":{"title":"Checkout","widgets":[{"id":"panel","title":"Cart","panelTypes":"graph","query":{"queryType":"builder","builder":{"queryData":[{"queryName":"A","dataSource":"traces","aggregations":[{"expression":"sum(cart.value)"}],"filter":{"expression":"service.name = 'checkout'"},"having":{"expression":""}}]}}}]}}`
+	if err := json.Unmarshal([]byte(payload), &wire); err != nil {
+		t.Fatal(err)
+	}
+	dashboard := wire.dashboard()
+	if len(dashboard.Widgets) != 1 || len(dashboard.Widgets[0].Query.UnsupportedNodes) != 0 {
+		t.Fatalf("dashboard = %#v", dashboard)
+	}
+}
+
+func TestQueryRequestOmitsResponseOnlyNodes(t *testing.T) {
+	request, err := newQueryRequest(BuilderQueryRequest{
+		Start: time.Now().Add(-time.Minute), End: time.Now(), Signal: "traces",
+		Filter: "service.name = 'checkout'", Aggregations: []Aggregation{{Expression: "count()"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"orderBy"`, `"having"`, `"functions"`, `"groupBy"`} {
+		if strings.Contains(string(payload), field) {
+			t.Fatalf("request contains response-only field %s: %s", field, payload)
+		}
+	}
+}
+
+func TestQueryWarningAcceptsStringOrObject(t *testing.T) {
+	for input, expected := range map[string]string{
+		`"legacy warning"`:            "legacy warning",
+		`{"message":"typed warning"}`: "typed warning",
+	} {
+		var wire queryWire
+		if err := json.Unmarshal([]byte(`{"warning":`+input+`,"data":{"results":[]}}`), &wire); err != nil {
+			t.Fatal(err)
+		}
+		if warning := wire.result().Warning; warning != expected {
+			t.Fatalf("warning = %q, want %q", warning, expected)
+		}
 	}
 }
 

@@ -2,11 +2,12 @@
 
 ## Current phase
 
-- Phase: 3 — Consumer-driven contract miner
+- Phase: 4 — Verification engine and evidence semantics
 - Owner: Codex implementation
-- Branch: `phase/3-contract-miner`
+- Branch: `phase/4-verification-engine`
 - State: acceptance passed; awaiting external review
-- Scope: stable contract domain, fixture-proven dashboard/alert extraction, deterministic YAML, `guardian mine`, and Phase 3 acceptance only
+- Scope: four canonical checks, evidence-complete verdicts, stable exit codes,
+  bounded polling, stale-state isolation, and Phase 4 acceptance only
 
 ## Authority
 
@@ -96,7 +97,20 @@ or resource values were recorded.
   secret scan, and focused live mining smoke against the seeded Phase 1
   dashboard and alert.
 
+## Phase 4 empirical findings
+
+- SigNoz Builder requests reject response-only `orderBy` nodes; the typed
+  adapter now uses a minimal request-only wire.
+- Query warnings may be strings or structured objects, and alert-history
+  responses use a `status`/`data` envelope with `unixMilli` timestamps.
+- Alert history requires `state=firing`; the unsupported literal `state=all`
+  returns an empty result.
+- Clean Foundry needs a distinct schema-warmup run, and alert injection is
+  aligned to the observed minute-bucket boundary. Candidate evidence remains
+  isolated by run ID and explicit time windows.
+- `scripts/accept/phase4.sh` passed repeated healthy, broken, and no-load
+  verdicts with exit codes 0, 1, and 2; invalid contracts exit 3.
+
 ## Deferred work
 
-Verification, evidence, CI, blast graph, and product UI remain assigned to later
-phases.
+CI, blast graph, reporting, and product UI remain assigned to later phases.
