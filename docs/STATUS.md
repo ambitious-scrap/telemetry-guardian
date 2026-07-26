@@ -248,3 +248,23 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
 - No Phase 4 or Phase 5 acceptance was rerun. No SigNoz image or Foundry file
   was changed. `demo-freeze` remains unchanged. Selected P1 and P2 work
   remains deferred.
+
+## Phase 7 demo query-window correction
+
+- The demo blocker was confirmed as a 5-second SigNoz bucket boundary: the
+  five rapid requests occupied a bucket whose timestamp preceded the
+  second-level verification start, while P0-3 correctly excluded that point.
+- `scripts/demo.sh` now aligns each candidate start to the current
+  `QUERY_STEP_SECONDS=5` bucket immediately before the existing five-request
+  workload. Healthy, broken, and repaired releases share this logic through
+  `inject_fault`; unique run IDs, fault timing, end-window logic, and five
+  minimum samples remain unchanged.
+- The verifier, minimum-sample requirement, and SigNoz query construction were
+  not changed. `make accept-phase6` passed healthy PASS x4, broken exactly
+  three FAILs with `payment.authorize` PASS, and repaired PASS x4. Functional
+  responses remained identical; healthy and repaired alerts fired and the
+  broken alert missed.
+- The alignment helper asserts unchanged divisible epochs, backward alignment
+  for offsets one through four, no forward movement, and an adjustment below
+  five seconds. `demo-freeze` remains unchanged; no image or Foundry file was
+  changed.

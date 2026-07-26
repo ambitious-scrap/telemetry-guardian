@@ -722,3 +722,23 @@ bounded query points after warmup. The strict verifier/demo window boundary is
 outside this Phase 2-only correction and remains unresolved; no protected demo
 or verifier semantics were changed. No Phase 4 or Phase 5 rerun was performed,
 and `demo-freeze` remains unchanged.
+
+### Demo query-window blocker correction
+
+The Phase 6 healthy verifier failure was caused by five rapid requests sharing
+a SigNoz 5-second bucket whose timestamp preceded the second-level demo start.
+P0-3 timestamp filtering behaved correctly by excluding that out-of-window
+point, leaving the later fault point and an observed sample count of 1/5.
+
+`scripts/demo.sh` now aligns the shared candidate start to the beginning of the
+current `QUERY_STEP_SECONDS=5` bucket immediately before generating the five
+requests. The helper asserts divisible epochs remain unchanged, offsets one
+through four align backward, no adjustment moves forward, and every adjustment
+is less than five seconds. Unique run IDs preserve candidate isolation.
+
+Verifier semantics, SigNoz query construction, minimum samples, fault timing,
+and end-window logic remain unchanged. `make accept-phase6` passed healthy
+PASS x4, broken exactly three FAILs with `payment.authorize` PASS, and repaired
+PASS x4. Functional responses remained identical; healthy and repaired alerts
+fired and the broken alert missed. No image or Foundry file changed, and
+`demo-freeze` remains unchanged.
