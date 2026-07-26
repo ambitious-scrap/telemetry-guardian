@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"github.com/ambitious-scrap/telemetry-guardian/internal/contracts"
 	"github.com/ambitious-scrap/telemetry-guardian/internal/evidence"
 	"github.com/ambitious-scrap/telemetry-guardian/internal/miner"
+	"github.com/ambitious-scrap/telemetry-guardian/internal/report"
 	"github.com/ambitious-scrap/telemetry-guardian/internal/signoz"
 	"github.com/ambitious-scrap/telemetry-guardian/internal/verifier"
 )
@@ -38,15 +41,17 @@ func execute(args []string, stdout, stderr io.Writer) int {
 
 func run(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: guardian mine|verify [flags]")
+		return errors.New("usage: guardian mine|verify|report [flags]")
 	}
 	switch args[0] {
 	case "mine":
 		return runMine(args[1:], stdout, stderr)
 	case "verify":
 		return runVerify(args[1:], stdout, stderr)
+	case "report":
+		return runReport(args[1:], stdout, stderr)
 	default:
-		return errors.New("usage: guardian mine|verify [flags]")
+		return errors.New("usage: guardian mine|verify|report [flags]")
 	}
 }
 
@@ -185,6 +190,75 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 		return &exitError{code: code, err: fmt.Errorf("verification result is %s", verdict.Overall)}
 	}
 	return nil
+}
+
+func runReport(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("guardian report", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	contractPath := flags.String("contract", envOr("GUARDIAN_CONTRACT", defaultContractPath), "contract input path")
+	verdictPath := flags.String("verdict", envOr("GUARDIAN_VERDICT", defaultVerdictPath), "verdict input path")
+	output := flags.String("output", envOr("GUARDIAN_REPORT", "guardian-report.html"), "HTML report output path")
+	markdownOutput := flags.String("markdown-output", envOr("GUARDIAN_SUMMARY", ""), "optional Markdown summary output path")
+	if err := flags.Parse(args); err != nil {
+		return &exitError{code: 3, err: err}
+	}
+	if *contractPath == "" || *verdictPath == "" || *output == "" {
+		return &exitError{code: 3, err: errors.New("contract, verdict, and report output paths are required")}
+	}
+	contractFile, err := os.Open(*contractPath)
+	if err != nil {
+		return &exitError{code: 3, err: fmt.Errorf("open contract: %w", err)}
+	}
+	contract, err := contracts.LoadYAML(contractFile)
+	closeErr := contractFile.Close()
+	if err != nil {
+		return &exitError{code: 3, err: err}
+	}
+	if closeErr != nil {
+		return &exitError{code: 3, err: fmt.Errorf("close contract: %w", closeErr)}
+	}
+	verdictFile, err := os.Open(*verdictPath)
+	if err != nil {
+		return &exitError{code: 3, err: fmt.Errorf("open verdict: %w", err)}
+	}
+	var verdict evidence.Verdict
+	decoder := json.NewDecoder(verdictFile)
+	err = decoder.Decode(&verdict)
+	closeErr = verdictFile.Close()
+	if err != nil {
+		return &exitError{code: 3, err: fmt.Errorf("decode verdict: %w", err)}
+	}
+	if closeErr != nil {
+		return &exitError{code: 3, err: fmt.Errorf("close verdict: %w", closeErr)}
+	}
+	document, err := report.Build(verdict, contract)
+	if err != nil {
+		return &exitError{code: 3, err: err}
+	}
+	var html bytes.Buffer
+	if err := report.RenderHTML(&html, document); err != nil {
+		return &exitError{code: 2, err: err}
+	}
+	if err := writeFile(*output, html.Bytes(), 0o644); err != nil {
+		return &exitError{code: 2, err: fmt.Errorf("write report: %w", err)}
+	}
+	if *markdownOutput != "" {
+		if err := writeFile(*markdownOutput, []byte(report.Markdown(document)), 0o644); err != nil {
+			return &exitError{code: 2, err: fmt.Errorf("write summary: %w", err)}
+		}
+	}
+	fmt.Fprintf(stdout, "report written: %s state=%s\n", filepath.Clean(*output), document.State)
+	return nil
+}
+
+func writeFile(path string, payload []byte, mode os.FileMode) error {
+	parent := filepath.Dir(path)
+	if parent != "." {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, payload, mode)
 }
 
 func parseTime(name, value string) (time.Time, error) {

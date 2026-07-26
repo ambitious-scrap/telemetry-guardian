@@ -23,10 +23,10 @@ func TestRunMineRequiresConfiguredSigNoz(t *testing.T) {
 	}
 }
 
-func TestRunRejectsLaterPhaseCommands(t *testing.T) {
+func TestRunReportRequiresInputs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{"report"}, &stdout, &stderr); err == nil {
-		t.Fatal("unsupported command was accepted")
+		t.Fatal("report accepted missing inputs")
 	}
 }
 

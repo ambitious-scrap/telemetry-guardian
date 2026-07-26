@@ -1,0 +1,72 @@
+name: Telemetry Guardian
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guardian:
+    runs-on: ubuntu-latest
+    env:
+      SIGNOZ_URL: ${{ vars.SIGNOZ_URL }}
+      SIGNOZ_TOKEN: ${{ secrets.SIGNOZ_TOKEN }}
+      GUARDIAN_SERVICE: telemetry-guardian-checkout
+      GUARDIAN_RELEASE: candidate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and test Guardian
+        run: |
+          mkdir -p .run
+          go build -o .run/guardian ./cmd/guardian
+          go test ./...
+      - name: Connect to isolated SigNoz environment
+        run: curl --fail --silent --show-error --max-time 10 "$SIGNOZ_URL/api/v1/health" >/dev/null
+      - name: Seed and deploy candidate
+        run: |
+          run_id="guardian-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+          ./scripts/seed/dashboard.sh "$run_id"
+          ./scripts/seed/alert.sh "$run_id"
+          ./scripts/seed/verify.sh
+          ./scripts/env/deploy.sh healthy "$run_id"
+          ./scripts/load/generate.sh 5
+          fault_epoch=$(date +%s)
+          echo "GUARDIAN_START=$(date -u -d "@$((fault_epoch - 30))" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "GUARDIAN_FAULT_INJECTED_AT=$(date -u -d "@$fault_epoch" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          echo "GUARDIAN_END=$(date -u -d "@$((fault_epoch + 60))" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          ./scripts/load/fault.sh
+      - name: Mine contract
+        run: |
+          dashboard_id=$(jq -er '.data[]? | select(.data.title == "telemetry-guardian-checkout") | .id' .run/dashboards.json | head -1)
+          alert_id=$(jq -er '.data.id' .run/alert-response.json)
+          echo "SIGNOZ_DASHBOARD_ID=$dashboard_id" >> "$GITHUB_ENV"
+          echo "SIGNOZ_ALERT_ID=$alert_id" >> "$GITHUB_ENV"
+          .run/guardian mine --output contracts/telemetry.guardian.yaml
+      - name: Verify and publish Guardian result
+        if: always()
+        id: guardian
+        continue-on-error: true
+        env:
+          GUARDIAN_ARTIFACT_DIR: .run/guardian-artifacts
+          GUARDIAN_CONTRACT: contracts/telemetry.guardian.yaml
+          GUARDIAN_VERDICT: .run/guardian-artifacts/verdict.json
+          GUARDIAN_REPORT: .run/guardian-artifacts/guardian-report.html
+          GUARDIAN_SUMMARY: .run/guardian-artifacts/summary.md
+        run: ./scripts/ci/guardian.sh
+      - name: Upload Guardian artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemetry-guardian-${{ github.run_id }}
+          path: .run/guardian-artifacts
+          if-no-files-found: error
+      - name: Enforce Guardian exit classification
+        if: always()
+        run: test "$(cat .run/guardian-artifacts/exit-code)" = 0
