@@ -697,3 +697,28 @@ not moved or recreated.
 
 P1-1, P1-3, P1-4, P1-7, P1-11, P1-12, and every P2 finding remain deferred.
 No stretch work or Phase 8 work began.
+
+### Phase 2 acceptance blocker correction
+
+The standalone Phase 2 failure was reproduced with a bounded safe probe. An
+empty-filter trace request returned HTTP 200, while the exact service-filtered
+trace and log requests returned HTTP 400 with `invalid_input` before telemetry
+warmup. After one unique warmup run used the existing deploy, workload, fault,
+and telemetry assertion scripts, the same filtered trace and log requests
+returned HTTP 200. This confirms a cold SigNoz field-discovery/data precondition,
+not an obsolete adapter query shape.
+
+`scripts/accept/phase2.sh` now performs that deterministic warmup before
+`TestLiveSigNozAdapter`, keeps the filtered trace and log checks unchanged, and
+cleans only the checkout runtime container. Phase 2 acceptance passed. No
+adapter, query-language, image, Foundry, or Phase 4 implementation was changed.
+
+The separately requested `make demo-smoke` validation was attempted once,
+followed by one focused sample/window probe and the permitted final attempt.
+Both smoke attempts stopped at healthy verification because `cart.value` and
+`payment.authorize` reached sample count 1 of 5 and were INCONCLUSIVE, while
+`error.type` and alert firing passed. The focused probe confirmed positive
+bounded query points after warmup. The strict verifier/demo window boundary is
+outside this Phase 2-only correction and remains unresolved; no protected demo
+or verifier semantics were changed. No Phase 4 or Phase 5 rerun was performed,
+and `demo-freeze` remains unchanged.

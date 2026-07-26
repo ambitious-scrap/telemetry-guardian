@@ -222,3 +222,29 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
   was not run because the required live validation set was not fully green.
 - `demo-freeze` remains unchanged. P1-1, P1-3, P1-4, P1-7, P1-11, P1-12,
   and all P2 findings remain deferred. No Phase 6 demo was rerun.
+
+## Phase 7 Phase 2 acceptance correction
+
+- A bounded live probe confirmed the Phase 2 blocker was a cold SigNoz field
+  discovery/data precondition: the empty-filter trace query returned HTTP 200,
+  while the exact filtered trace and log queries returned HTTP 400 with the
+  safe `invalid_input` classification before telemetry existed.
+- A unique `phase2-schema-warmup-*` run now deploys the existing healthy
+  checkout, generates one deterministic request, injects one payment timeout,
+  and reuses `scripts/load/assert-telemetry.sh` before the live adapter test.
+  The acceptance path cleans only its checkout container on exit and leaves the
+  shared SigNoz environment intact.
+- The exact filtered trace and log requests returned HTTP 200 after warmup.
+  `scripts/accept/phase2.sh` passed, including live dashboard, alert, trace,
+  log, and alert-history adapter coverage. No adapter request shape or query
+  language was changed.
+- `make demo-smoke` was attempted once, followed by one focused sample/window
+  probe and the permitted final attempt. Both smoke attempts stopped at the
+  healthy verifier with `cart.value` and `payment.authorize` INCONCLUSIVE at
+  sample count 1 of 5; `error.type` and alert firing passed. The focused probe
+  confirmed positive bounded query points after warmup. Correcting that strict
+  verifier/demo window boundary is outside this Phase 2-only change and was
+  not attempted.
+- No Phase 4 or Phase 5 acceptance was rerun. No SigNoz image or Foundry file
+  was changed. `demo-freeze` remains unchanged. Selected P1 and P2 work
+  remains deferred.
