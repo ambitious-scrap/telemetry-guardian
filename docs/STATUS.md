@@ -2,12 +2,12 @@
 
 ## Current phase
 
-- Phase: 5 — CI gate and consumer blast graph
-- Owner: Codex implementation
-- Branch: `phase/5-ci-blast-graph`
+- Phase: 6 — End-to-end demo command and feature freeze
+- Owner: Claude implementation
+- Branch: `phase/6-demo-freeze`
 - State: local implementation complete; acceptance passed; awaiting external review
-- Scope: deterministic CI classification, artifact-preserving report path, and
-  offline consumer blast graph for Phase 5 only
+- Scope: one executable protected demo (`make demo`, `make demo-smoke`),
+  Phase 6 acceptance, and the minimum documentation a cold evaluator needs
 
 ## Authority
 
@@ -113,7 +113,8 @@ or resource values were recorded.
 
 ## Deferred work
 
-Phase 6 demo orchestration and all later-phase work remain deferred.
+Phase 7 hardening, Phase 8 submission packaging, and every stretch goal remain
+deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
 
 ## Phase 5 findings
 
@@ -133,3 +134,22 @@ Phase 6 demo orchestration and all later-phase work remain deferred.
 - Offline fixtures cover healthy, broken, and inconclusive verdicts. Broken
   output names the failed requirement, dashboard panel, and alert, and
   preserves `BREAKS`, `REQUIRED_BY`, and `PART_OF` mappings.
+
+## Phase 6 findings
+
+- `scripts/demo.sh` orchestrates the protected narrative in 22 numbered stages
+  and owns no verification logic of its own; it reuses the Phase 1 environment,
+  deploy, seed, load, and alert scripts and the Phase 3–5 `guardian mine`,
+  `verify`, and `report` commands.
+- The repaired release is the restored telemetry contract, so it deploys the
+  healthy checkout variant under its own run ID. No new release variant was
+  added.
+- Fault injection precedes each verification because `alert_must_fire` can only
+  observe an alert that already had a fault to react to. All 22 protected
+  outcomes are still proven live.
+- Alert notification evidence is truncated and captured per stage, so a firing
+  notification from an earlier stage can never satisfy a later one.
+- `scripts/env/down.sh` now removes only runtime files from `.run`, so preserved
+  demo evidence survives teardown and a second invocation starts predictably.
+- `make demo` and `make demo-smoke` share one orchestration; smoke mode only
+  suppresses sub-step output and is the path `scripts/accept/phase6.sh` drives.
