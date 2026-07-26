@@ -2,12 +2,13 @@
 
 ## Current phase
 
-- Phase: 6 — End-to-end demo command and feature freeze
-- Owner: Claude implementation
-- Branch: `phase/6-demo-freeze`
-- State: local implementation complete; acceptance passed; awaiting external review
-- Scope: one executable protected demo (`make demo`, `make demo-smoke`),
-  Phase 6 acceptance, and the minimum documentation a cold evaluator needs
+- Phase: 7 — Release-candidate review
+- Owner: Codex review pass
+- Branch: `phase/7-release-candidate`
+- State: review pass complete; `docs/reviews/release-candidate.md` records
+  P0/P1/P2 findings and awaits implementation review
+- Scope: review only; no product-code fixes, stretch work, live/demo reruns,
+  or `demo-freeze` tag changes
 
 ## Authority
 
@@ -153,3 +154,16 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
   demo evidence survives teardown and a second invocation starts predictably.
 - `make demo` and `make demo-smoke` share one orchestration; smoke mode only
   suppresses sub-step output and is the path `scripts/accept/phase6.sh` drives.
+
+## Phase 7 review findings
+
+- The frozen tree is content-identical to `origin/main`; the Phase 6 merge is
+  present at `a883e72`, and the `demo-freeze` tag was not changed.
+- Offline `make fmt-check`, `make lint`, `make test`, shell syntax validation,
+  `git diff --check`, and the committed-content high-signal secret scan passed.
+- The review artifact identifies four P0 correctness blockers around unsupported
+  input, canonical contract semantics, returned query timestamps, and
+  malformed verdict aggregation.
+- The hosted Guardian healthy-workflow criterion remains partial because the
+  externally reachable `SIGNOZ_URL` variable and `SIGNOZ_TOKEN` secret are not
+  configured; this is not classified as a product-code P0.
