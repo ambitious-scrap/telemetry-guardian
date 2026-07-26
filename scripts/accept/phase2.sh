@@ -6,6 +6,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 RUN_DIR="$ROOT/.run"
 SIGNOZ_URL=${SIGNOZ_URL:-http://127.0.0.1:18080}
 GOCACHE=${GOCACHE:-/private/tmp/telemetry-guardian-gocache}
+STAMP=$(date -u +%Y%m%d%H%M%S)
 RUN_ID=${RUN_ID:-phase2-live-$(date -u +%Y%m%d%H%M%S)}
 cd "$ROOT"
 . "$ROOT/scripts/env/common.sh"
@@ -40,6 +41,18 @@ fi
 ./scripts/seed/dashboard.sh "$RUN_ID"
 ./scripts/seed/alert.sh "$RUN_ID"
 ./scripts/seed/verify.sh
+
+cleanup() {
+	stop_checkout >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# Current SigNoz field discovery requires deterministic telemetry before filtered adapter queries.
+warmup_run_id="phase2-schema-warmup-$STAMP-$$"
+./scripts/env/deploy.sh healthy "$warmup_run_id"
+./scripts/load/generate.sh 1
+./scripts/load/fault.sh "$RUN_DIR/phase2-schema-warmup-fault.json"
+./scripts/load/assert-telemetry.sh healthy "$warmup_run_id"
 
 dashboard_id=$(jq -er '.data[]? | select(.data.title == "telemetry-guardian-checkout") | .id' "$RUN_DIR/dashboards.json" | head -1)
 alert_id=$(jq -er '.data.id' "$RUN_DIR/alert-response.json")

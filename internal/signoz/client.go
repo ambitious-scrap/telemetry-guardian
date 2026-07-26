@@ -327,6 +327,9 @@ func (c *HTTPClient) GetDashboard(ctx context.Context, id string) (Dashboard, er
 	if err := c.do(ctx, http.MethodGet, "/api/v1/dashboards/"+url.PathEscape(id), nil, "GetDashboard", &response); err != nil {
 		return Dashboard{}, err
 	}
+	if err := validateDashboardWire(response); err != nil {
+		return Dashboard{}, invalidResponse("GetDashboard", err)
+	}
 	return response.dashboard(), nil
 }
 
@@ -337,6 +340,9 @@ func (c *HTTPClient) GetAlert(ctx context.Context, id string) (Alert, error) {
 	var response alertWire
 	if err := c.do(ctx, http.MethodGet, "/api/v2/rules/"+url.PathEscape(id), nil, "GetAlert", &response); err != nil {
 		return Alert{}, err
+	}
+	if err := validateAlertWire(response); err != nil {
+		return Alert{}, invalidResponse("GetAlert", err)
 	}
 	return response.alert(), nil
 }
@@ -635,6 +641,96 @@ type dashboardWidgetWire struct {
 	Description string             `json:"description"`
 	PanelType   string             `json:"panelTypes"`
 	Query       dashboardQueryWire `json:"query"`
+}
+
+func validateDashboardWire(wire dashboardWire) error {
+	if strings.TrimSpace(wire.ID) == "" {
+		return &wireDecodeError{path: "$.data.id", cause: errors.New("dashboard id is required")}
+	}
+	if strings.TrimSpace(wire.Data.Title) == "" {
+		return &wireDecodeError{path: "$.data.data.title", cause: errors.New("dashboard title is required")}
+	}
+	if len(wire.Data.Widgets) == 0 {
+		return &wireDecodeError{path: "$.data.data.widgets", cause: errors.New("dashboard widgets are required")}
+	}
+	for index, widget := range wire.Data.Widgets {
+		path := fmt.Sprintf("$.data.data.widgets[%d]", index)
+		if strings.TrimSpace(widget.ID) == "" {
+			return &wireDecodeError{path: path + ".id", cause: errors.New("widget id is required")}
+		}
+		if strings.TrimSpace(widget.Title) == "" {
+			return &wireDecodeError{path: path + ".title", cause: errors.New("widget title is required")}
+		}
+		if strings.TrimSpace(widget.Query.QueryType) == "" {
+			return &wireDecodeError{path: path + ".query", cause: errors.New("widget query is required")}
+		}
+		if widget.Query.QueryType != "builder" {
+			continue
+		}
+		if len(widget.Query.Builder.QueryData) == 0 {
+			return &wireDecodeError{path: path + ".query.builder.queryData", cause: errors.New("supported builder query is required")}
+		}
+		for queryIndex, query := range widget.Query.Builder.QueryData {
+			if err := validateQuerySpecWire(query, fmt.Sprintf("%s.query.builder.queryData[%d]", path, queryIndex)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateAlertWire(wire alertWire) error {
+	if strings.TrimSpace(wire.ID) == "" {
+		return &wireDecodeError{path: "$.data.id", cause: errors.New("alert id is required")}
+	}
+	if strings.TrimSpace(wire.Alert) == "" {
+		return &wireDecodeError{path: "$.data.alert", cause: errors.New("alert name is required")}
+	}
+	if strings.TrimSpace(wire.Condition.CompositeQuery.QueryType) == "" {
+		return &wireDecodeError{path: "$.data.condition.compositeQuery", cause: errors.New("composite query is required")}
+	}
+	if wire.Condition.CompositeQuery.QueryType == "builder" {
+		if len(wire.Condition.CompositeQuery.Queries) == 0 {
+			return &wireDecodeError{path: "$.data.condition.compositeQuery.queries", cause: errors.New("supported alert query is required")}
+		}
+		for index, query := range wire.Condition.CompositeQuery.Queries {
+			path := fmt.Sprintf("$.data.condition.compositeQuery.queries[%d]", index)
+			if strings.TrimSpace(query.Type) == "" {
+				return &wireDecodeError{path: path + ".type", cause: errors.New("alert query type is required")}
+			}
+			if query.Type == "builder_query" {
+				if err := validateQuerySpecWire(query.Spec, path+".spec"); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if len(wire.Condition.Thresholds.Spec) == 0 {
+		return &wireDecodeError{path: "$.data.condition.thresholds.spec", cause: errors.New("alert threshold is required")}
+	}
+	for index, threshold := range wire.Condition.Thresholds.Spec {
+		path := fmt.Sprintf("$.data.condition.thresholds.spec[%d]", index)
+		if strings.TrimSpace(threshold.Name) == "" || strings.TrimSpace(threshold.MatchType) == "" || strings.TrimSpace(threshold.Operation) == "" {
+			return &wireDecodeError{path: path, cause: errors.New("alert threshold fields are required")}
+		}
+	}
+	return nil
+}
+
+func validateQuerySpecWire(spec querySpecWire, path string) error {
+	if strings.TrimSpace(firstNonEmpty(spec.Name, spec.QueryName)) == "" {
+		return &wireDecodeError{path: path, cause: errors.New("query identity is required")}
+	}
+	if strings.TrimSpace(firstNonEmpty(spec.Signal, spec.DataSource, spec.Source)) == "" {
+		return &wireDecodeError{path: path + ".signal", cause: errors.New("query signal is required")}
+	}
+	if len(spec.Aggregations) == 0 {
+		return &wireDecodeError{path: path + ".aggregations", cause: errors.New("query aggregation is required")}
+	}
+	if strings.TrimSpace(spec.Filter.Expression) == "" {
+		return &wireDecodeError{path: path + ".filter.expression", cause: errors.New("query filter is required")}
+	}
+	return nil
 }
 
 type dashboardQueryWire struct {

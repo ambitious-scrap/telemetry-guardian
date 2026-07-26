@@ -187,3 +187,84 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
   no-load, and invalid-contract outcomes after one focused timestamp probe.
 - Phase 6 demo and Phase 6 acceptance were not rerun. `demo-freeze` remains
   unchanged. P1 and P2 review findings remain deferred.
+
+## Phase 7 selected P1 hardening
+
+- P1-2 is corrected: alert-history retrieval follows returned cursors with a
+  five-page bound, repeated-cursor detection, one bounded query context, and
+  explicit INCONCLUSIVE results for cursor loops, exhausted page budgets, and
+  cancellation or timeout.
+- P1-5 is corrected: successful dashboard and alert responses validate only
+  the supported MVP identity, dependency-query, composite-query, and
+  threshold structures; malformed success envelopes return typed
+  `ErrInvalidResponse` while harmless resource metadata remains accepted.
+- P1-6 is corrected: CI artifacts are cleared and staged per run, fixture
+  copies are checked, verdicts and reports are validated before exit 0, and
+  exit 3 writes fresh invalid-configuration diagnostics. Phase 5 fixture
+  acceptance covers stale, missing, malformed, and report-failure cases.
+- P1-8 is corrected: registration, login, session, and token files use mode
+  `0600`; the checkout exporter reports only safe OTLP path/status/classification
+  information and never includes raw response bodies.
+- P1-9 is corrected: report input rejects trailing JSON and unknown or empty
+  verdict states, and `verifier.Verify` returns typed invalid input for a nil
+  context without panicking.
+- P1-10 is corrected: FAIL graph dependencies retain `BREAKS`, while
+  INCONCLUSIVE dependencies use deterministic `UNRESOLVED` relationships.
+- Focused package tests, `make fmt-check`, `make lint`, `make test`, shell
+  syntax validation, and Phase 5 acceptance passed. The single Phase 4
+  acceptance run passed all healthy, broken, no-load, and invalid-contract
+  scenarios.
+- Phase 2 acceptance reached the live adapter but failed its standalone
+  filtered builder query with SigNoz `invalid_input`; a focused probe showed
+  the current instance accepts the same request only with an empty filter.
+  This is an environment/API compatibility issue outside the selected P1
+  scope; no query breadth or image pinning change was made. `make demo-smoke`
+  was not run because the required live validation set was not fully green.
+- `demo-freeze` remains unchanged. P1-1, P1-3, P1-4, P1-7, P1-11, P1-12,
+  and all P2 findings remain deferred. No Phase 6 demo was rerun.
+
+## Phase 7 Phase 2 acceptance correction
+
+- A bounded live probe confirmed the Phase 2 blocker was a cold SigNoz field
+  discovery/data precondition: the empty-filter trace query returned HTTP 200,
+  while the exact filtered trace and log queries returned HTTP 400 with the
+  safe `invalid_input` classification before telemetry existed.
+- A unique `phase2-schema-warmup-*` run now deploys the existing healthy
+  checkout, generates one deterministic request, injects one payment timeout,
+  and reuses `scripts/load/assert-telemetry.sh` before the live adapter test.
+  The acceptance path cleans only its checkout container on exit and leaves the
+  shared SigNoz environment intact.
+- The exact filtered trace and log requests returned HTTP 200 after warmup.
+  `scripts/accept/phase2.sh` passed, including live dashboard, alert, trace,
+  log, and alert-history adapter coverage. No adapter request shape or query
+  language was changed.
+- `make demo-smoke` was attempted once, followed by one focused sample/window
+  probe and the permitted final attempt. Both smoke attempts stopped at the
+  healthy verifier with `cart.value` and `payment.authorize` INCONCLUSIVE at
+  sample count 1 of 5; `error.type` and alert firing passed. The focused probe
+  confirmed positive bounded query points after warmup. Correcting that strict
+  verifier/demo window boundary is outside this Phase 2-only change and was
+  not attempted.
+- No Phase 4 or Phase 5 acceptance was rerun. No SigNoz image or Foundry file
+  was changed. `demo-freeze` remains unchanged. Selected P1 and P2 work
+  remains deferred.
+
+## Phase 7 demo query-window correction
+
+- The demo blocker was confirmed as a 5-second SigNoz bucket boundary: the
+  five rapid requests occupied a bucket whose timestamp preceded the
+  second-level verification start, while P0-3 correctly excluded that point.
+- `scripts/demo.sh` now aligns each candidate start to the current
+  `QUERY_STEP_SECONDS=5` bucket immediately before the existing five-request
+  workload. Healthy, broken, and repaired releases share this logic through
+  `inject_fault`; unique run IDs, fault timing, end-window logic, and five
+  minimum samples remain unchanged.
+- The verifier, minimum-sample requirement, and SigNoz query construction were
+  not changed. `make accept-phase6` passed healthy PASS x4, broken exactly
+  three FAILs with `payment.authorize` PASS, and repaired PASS x4. Functional
+  responses remained identical; healthy and repaired alerts fired and the
+  broken alert missed.
+- The alignment helper asserts unchanged divisible epochs, backward alignment
+  for offsets one through four, no forward movement, and an adjustment below
+  five seconds. `demo-freeze` remains unchanged; no image or Foundry file was
+  changed.

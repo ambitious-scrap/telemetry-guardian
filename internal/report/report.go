@@ -267,6 +267,10 @@ func requirementLabel(requirement contracts.Requirement) string {
 }
 
 func addConsumerGraph(document *Document, info consumerInfo, requirementID string, state evidence.State) {
+	relationship := "BREAKS"
+	if state == evidence.Inconclusive {
+		relationship = "UNRESOLVED"
+	}
 	consumer := info.consumer
 	if consumer.Type == "dashboard_panel" {
 		panelID := info.nodeID
@@ -275,13 +279,13 @@ func addConsumerGraph(document *Document, info consumerInfo, requirementID strin
 		addNode(document, Node{ID: panelID, Kind: "panel", Label: safeText(consumer.Name), Subtitle: "dashboard panel " + safeText(consumer.Source.PanelID), State: string(state)})
 		addEdge(document, Edge{From: panelID, To: dashboardID, Label: "PART_OF"})
 		addEdge(document, Edge{From: panelID, To: requirementID, Label: "REQUIRED_BY"})
-		addEdge(document, Edge{From: requirementID, To: panelID, Label: "BREAKS"})
+		addEdge(document, Edge{From: requirementID, To: panelID, Label: relationship})
 		return
 	}
 	alertID := info.nodeID
 	addNode(document, Node{ID: alertID, Kind: "alert", Label: safeText(consumer.Name), Subtitle: "alert " + safeText(consumer.Source.AlertID), State: string(state)})
 	addEdge(document, Edge{From: alertID, To: requirementID, Label: "REQUIRED_BY"})
-	addEdge(document, Edge{From: requirementID, To: alertID, Label: "BREAKS"})
+	addEdge(document, Edge{From: requirementID, To: alertID, Label: relationship})
 }
 
 func addNode(document *Document, node Node) {

@@ -668,3 +668,77 @@ above remain unchanged.
 The hosted healthy-workflow limitation remains **PARTIAL** because the
 externally reachable `SIGNOZ_URL` and `SIGNOZ_TOKEN` repository configuration
 is still absent. P1 and P2 findings remain deferred; no stretch work was begun.
+
+## 15. Selected P1 resolution pass
+
+The following approved P1 corrections were implemented without changing the
+protected Phase 6 path. The original audit findings above remain preserved;
+unselected P1 and all P2 findings remain deferred.
+
+| Finding | Resolution evidence | Validation | Status |
+|---|---|---|---|
+| P1-2 bounded alert-history pagination | `internal/verifier/verifier.go` follows `NextCursor` with a five-page bound, repeated-cursor detection, a single query timeout context, and fresh-event short-circuiting. | Verifier tests cover page-two fresh events, stale-plus-fresh pages, terminal cursors, loops, page budgets, cancellation, timeout, and INCONCLUSIVE mapping; Phase 4 acceptance passed. | RESOLVED |
+| P1-5 semantic success-envelope validation | `internal/signoz/client.go` validates required dashboard identity/title/widgets, supported widget queries, alert identity/composite query, supported alert query, and canonical threshold fields while retaining permissive top-level metadata decoding. | Sanitized success mutations cover missing identities, widgets, queries, composite query, and thresholds; typed `ErrInvalidResponse` assertions and existing fixtures pass. | RESOLVED |
+| P1-6 CI artifact integrity | `scripts/ci/guardian.sh` clears stale outputs, stages and publishes artifacts, validates current verdicts before report generation, and emits fresh exit-3 diagnostics. | `scripts/accept/phase5.sh` covers all exit classes, stale outputs, missing fixtures, malformed verdicts, report failure, retention, and classifications; Phase 5 acceptance passed. | RESOLVED |
+| P1-8 runtime secret files and exporter bodies | `scripts/seed/auth.sh` applies `umask 077` and explicit `0600` modes to credential-bearing files; `demo/checkout/main.go` logs only safe OTLP status classifications. | Checkout exporter regression test and Phase 5 shell assertions prove raw response bodies are omitted and private-file safeguards are present. | RESOLVED |
+| P1-9 malformed input/state validation | `cmd/guardian/main.go` rejects trailing JSON; `internal/verifier/verifier.go` rejects nil contexts with `ErrInvalidInput`; report construction rejects unknown or empty aggregate/check states. | CLI, verifier, evidence, and report regression tests cover trailing input, nil context, unknown/empty states, and precedence. | RESOLVED |
+| P1-10 honest INCONCLUSIVE graph relationships | `internal/report/report.go` emits `UNRESOLVED` for INCONCLUSIVE requirement-to-consumer edges and preserves `BREAKS` for FAIL. | Report tests and Phase 5 acceptance verify deterministic neutral relationships and distinct healthy/inconclusive output. | RESOLVED |
+
+Focused offline tests, formatting, lint, repository tests, Phase 4
+acceptance, and Phase 5 acceptance passed. Phase 2 acceptance reached the
+live adapter but its standalone filtered builder-query smoke was rejected by
+the current instance as `invalid_input`; a focused safe probe reproduced that
+nonempty-filter compatibility issue while an empty-filter request succeeded.
+No adapter query breadth or deferred P1-11 image pinning was changed. The
+required `make demo-smoke` run was therefore not started. `demo-freeze` was
+not moved or recreated.
+
+### Deferred after selected P1 pass
+
+P1-1, P1-3, P1-4, P1-7, P1-11, P1-12, and every P2 finding remain deferred.
+No stretch work or Phase 8 work began.
+
+### Phase 2 acceptance blocker correction
+
+The standalone Phase 2 failure was reproduced with a bounded safe probe. An
+empty-filter trace request returned HTTP 200, while the exact service-filtered
+trace and log requests returned HTTP 400 with `invalid_input` before telemetry
+warmup. After one unique warmup run used the existing deploy, workload, fault,
+and telemetry assertion scripts, the same filtered trace and log requests
+returned HTTP 200. This confirms a cold SigNoz field-discovery/data precondition,
+not an obsolete adapter query shape.
+
+`scripts/accept/phase2.sh` now performs that deterministic warmup before
+`TestLiveSigNozAdapter`, keeps the filtered trace and log checks unchanged, and
+cleans only the checkout runtime container. Phase 2 acceptance passed. No
+adapter, query-language, image, Foundry, or Phase 4 implementation was changed.
+
+The separately requested `make demo-smoke` validation was attempted once,
+followed by one focused sample/window probe and the permitted final attempt.
+Both smoke attempts stopped at healthy verification because `cart.value` and
+`payment.authorize` reached sample count 1 of 5 and were INCONCLUSIVE, while
+`error.type` and alert firing passed. The focused probe confirmed positive
+bounded query points after warmup. The strict verifier/demo window boundary is
+outside this Phase 2-only correction and remains unresolved; no protected demo
+or verifier semantics were changed. No Phase 4 or Phase 5 rerun was performed,
+and `demo-freeze` remains unchanged.
+
+### Demo query-window blocker correction
+
+The Phase 6 healthy verifier failure was caused by five rapid requests sharing
+a SigNoz 5-second bucket whose timestamp preceded the second-level demo start.
+P0-3 timestamp filtering behaved correctly by excluding that out-of-window
+point, leaving the later fault point and an observed sample count of 1/5.
+
+`scripts/demo.sh` now aligns the shared candidate start to the beginning of the
+current `QUERY_STEP_SECONDS=5` bucket immediately before generating the five
+requests. The helper asserts divisible epochs remain unchanged, offsets one
+through four align backward, no adjustment moves forward, and every adjustment
+is less than five seconds. Unique run IDs preserve candidate isolation.
+
+Verifier semantics, SigNoz query construction, minimum samples, fault timing,
+and end-window logic remain unchanged. `make accept-phase6` passed healthy
+PASS x4, broken exactly three FAILs with `payment.authorize` PASS, and repaired
+PASS x4. Functional responses remained identical; healthy and repaired alerts
+fired and the broken alert missed. No image or Foundry file changed, and
+`demo-freeze` remains unchanged.

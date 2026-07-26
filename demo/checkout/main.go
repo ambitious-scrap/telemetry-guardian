@@ -209,8 +209,13 @@ func (e exporter) post(ctx context.Context, path string, payload any) error {
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return fmt.Errorf("OTLP %s returned %s: %s", path, response.Status, strings.TrimSpace(string(message)))
+		classification := "server-error"
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			classification = "authorization-error"
+		} else if response.StatusCode >= 400 && response.StatusCode < 500 {
+			classification = "client-error"
+		}
+		return fmt.Errorf("OTLP export %s returned HTTP %d (%s)", path, response.StatusCode, classification)
 	}
 	return nil
 }

@@ -222,8 +222,7 @@ func runReport(args []string, stdout, stderr io.Writer) error {
 		return &exitError{code: 3, err: fmt.Errorf("open verdict: %w", err)}
 	}
 	var verdict evidence.Verdict
-	decoder := json.NewDecoder(verdictFile)
-	err = decoder.Decode(&verdict)
+	err = decodeSingleJSON(verdictFile, &verdict)
 	closeErr = verdictFile.Close()
 	if err != nil {
 		return &exitError{code: 3, err: fmt.Errorf("decode verdict: %w", err)}
@@ -259,6 +258,21 @@ func writeFile(path string, payload []byte, mode os.FileMode) error {
 		}
 	}
 	return os.WriteFile(path, payload, mode)
+}
+
+func decodeSingleJSON(reader io.Reader, output any) error {
+	decoder := json.NewDecoder(reader)
+	if err := decoder.Decode(output); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON after verdict")
+		}
+		return errors.New("trailing JSON after verdict")
+	}
+	return nil
 }
 
 func parseTime(name, value string) (time.Time, error) {

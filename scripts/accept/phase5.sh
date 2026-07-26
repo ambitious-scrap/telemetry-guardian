@@ -51,6 +51,10 @@ if grep -F 'contract healthy' "$inconclusive" >/dev/null; then
 	echo 'INCONCLUSIVE was presented as healthy' >&2
 	exit 1
 fi
+if ! grep -F 'UNRESOLVED' "$inconclusive" >/dev/null; then
+	echo 'INCONCLUSIVE graph omitted its neutral relationship' >&2
+	exit 1
+fi
 cp "$broken" "$RUN_DIR/broken-again.html"
 cmp "$broken" "$RUN_DIR/broken-again.html"
 grep -F 'evidence-drawer' "$broken" >/dev/null
@@ -84,6 +88,67 @@ for code in 0 1 2 3; do
 	test -s "$artifact/summary.md"
 	test "$(cat "$artifact/classification")" = "$(scripts/ci/classify.sh "$code")"
 done
+
+stale_artifacts="$RUN_DIR/stale-artifacts"
+mkdir -p "$stale_artifacts"
+printf '%s\n' stale >"$stale_artifacts/verdict.json"
+printf '%s\n' stale >"$stale_artifacts/guardian-report.html"
+printf '%s\n' stale >"$stale_artifacts/summary.md"
+set +e
+GUARDIAN_ARTIFACT_DIR="$stale_artifacts" GUARDIAN_BIN="$guardian" GUARDIAN_CONTRACT="$contract" GUARDIAN_FIXTURE_VERDICT="$ROOT/internal/report/testdata/healthy.json" GUARDIAN_FIXTURE_EXIT=0 scripts/ci/guardian.sh
+actual=$?
+set -e
+test "$actual" = 0
+if grep -F stale "$stale_artifacts/verdict.json" "$stale_artifacts/summary.md" "$stale_artifacts/guardian-report.html" >/dev/null 2>&1; then
+	echo 'stale Guardian artifacts survived a current run' >&2
+	exit 1
+fi
+
+missing_fixture_artifacts="$RUN_DIR/missing-fixture"
+set +e
+GUARDIAN_ARTIFACT_DIR="$missing_fixture_artifacts" GUARDIAN_BIN="$guardian" GUARDIAN_CONTRACT="$contract" GUARDIAN_FIXTURE_VERDICT="$RUN_DIR/does-not-exist.json" GUARDIAN_FIXTURE_EXIT=0 scripts/ci/guardian.sh
+actual=$?
+set -e
+test "$actual" = 3
+test "$(cat "$missing_fixture_artifacts/classification")" = INVALID_GUARDIAN_CONFIGURATION
+grep -F 'INVALID_GUARDIAN_CONFIGURATION' "$missing_fixture_artifacts/verdict.json" >/dev/null
+
+invalid_fixture="$RUN_DIR/invalid-verdict.json"
+printf '%s\n' '{not-json' >"$invalid_fixture"
+invalid_artifacts="$RUN_DIR/invalid-verdict"
+set +e
+GUARDIAN_ARTIFACT_DIR="$invalid_artifacts" GUARDIAN_BIN="$guardian" GUARDIAN_CONTRACT="$contract" GUARDIAN_FIXTURE_VERDICT="$invalid_fixture" GUARDIAN_FIXTURE_EXIT=0 scripts/ci/guardian.sh
+actual=$?
+set -e
+test "$actual" = 3
+test "$(cat "$invalid_artifacts/classification")" = INVALID_GUARDIAN_CONFIGURATION
+grep -F 'INVALID_GUARDIAN_CONFIGURATION' "$invalid_artifacts/verdict.json" >/dev/null
+
+failing_report_guardian="$RUN_DIR/failing-report-guardian"
+printf '%s\n' '#!/bin/sh' 'exit 1' >"$failing_report_guardian"
+chmod 700 "$failing_report_guardian"
+report_failure_artifacts="$RUN_DIR/report-failure"
+mkdir -p "$report_failure_artifacts"
+printf '%s\n' stale >"$report_failure_artifacts/guardian-report.html"
+set +e
+GUARDIAN_ARTIFACT_DIR="$report_failure_artifacts" GUARDIAN_BIN="$failing_report_guardian" GUARDIAN_CONTRACT="$contract" GUARDIAN_FIXTURE_VERDICT="$ROOT/internal/report/testdata/healthy.json" GUARDIAN_FIXTURE_EXIT=0 scripts/ci/guardian.sh
+actual=$?
+set -e
+test "$actual" = 2
+test -s "$report_failure_artifacts/verdict.json"
+test -s "$report_failure_artifacts/summary.md"
+test ! -e "$report_failure_artifacts/guardian-report.html"
+
+grep -F 'umask 077' scripts/seed/auth.sh >/dev/null
+grep -F 'chmod 600 "$RUN_DIR/register-request.json"' scripts/seed/auth.sh >/dev/null
+grep -F 'chmod 600 "$RUN_DIR/register-response.json"' scripts/seed/auth.sh >/dev/null
+grep -F 'chmod 600 "$RUN_DIR/session-context.json"' scripts/seed/auth.sh >/dev/null
+grep -F 'chmod 600 "$RUN_DIR/signoz-token"' scripts/seed/auth.sh >/dev/null
+if grep -F 'string(message)' demo/checkout/main.go >/dev/null || grep -F 'io.ReadAll(io.LimitReader(response.Body' demo/checkout/main.go >/dev/null; then
+	echo 'raw OTLP response body handling remains in checkout exporter' >&2
+	exit 1
+fi
+
 if grep -RniE 'Bearer[[:space:]]+[A-Za-z0-9._~-]{20,}|accessToken|api[_-]?key[[:space:]]*=' internal/report scripts/ci internal/report/testdata >/dev/null; then
 	echo 'secret-like value found in Phase 5 files' >&2
 	exit 1

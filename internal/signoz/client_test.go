@@ -377,6 +377,116 @@ func TestHTTPClientStrictlyDecodesDependencyQueries(t *testing.T) {
 	})
 }
 
+func TestHTTPClientRejectsSemanticallyMalformedSuccessResources(t *testing.T) {
+	readPayload := func(t *testing.T, name string) map[string]any {
+		t.Helper()
+		payload, err := fixtureFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(payload, &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	serve := func(t *testing.T, value map[string]any) *HTTPClient {
+		t.Helper()
+		payload, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write(payload)
+		}))
+		t.Cleanup(server.Close)
+		client, err := NewHTTPClient(Config{BaseURL: server.URL, Timeout: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+
+	tests := []struct {
+		name    string
+		fixture string
+		mutate  func(map[string]any)
+		get     func(*HTTPClient) error
+	}{
+		{name: "missing dashboard id", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) { delete(value["data"].(map[string]any), "id") }, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing dashboard title", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) { delete(value["data"].(map[string]any)["data"].(map[string]any), "title") }, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing dashboard widgets", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) { delete(value["data"].(map[string]any)["data"].(map[string]any), "widgets") }, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing widget identity", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) {
+			widget := value["data"].(map[string]any)["data"].(map[string]any)["widgets"].([]any)[0].(map[string]any)
+			delete(widget, "id")
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing widget query", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) {
+			widget := value["data"].(map[string]any)["data"].(map[string]any)["widgets"].([]any)[0].(map[string]any)
+			delete(widget, "query")
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing supported dashboard query", fixture: "testdata/dashboard-success.json", mutate: func(value map[string]any) {
+			builder := value["data"].(map[string]any)["data"].(map[string]any)["widgets"].([]any)[0].(map[string]any)["query"].(map[string]any)["builder"].(map[string]any)
+			builder["queryData"] = []any{}
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+			return err
+		}},
+		{name: "missing alert id", fixture: "testdata/alert-success.json", mutate: func(value map[string]any) { delete(value["data"].(map[string]any), "id") }, get: func(client *HTTPClient) error {
+			_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+			return err
+		}},
+		{name: "missing alert name", fixture: "testdata/alert-success.json", mutate: func(value map[string]any) { delete(value["data"].(map[string]any), "alert") }, get: func(client *HTTPClient) error {
+			_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+			return err
+		}},
+		{name: "missing composite query", fixture: "testdata/alert-success.json", mutate: func(value map[string]any) {
+			delete(value["data"].(map[string]any)["condition"].(map[string]any), "compositeQuery")
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+			return err
+		}},
+		{name: "missing supported alert query", fixture: "testdata/alert-success.json", mutate: func(value map[string]any) {
+			composite := value["data"].(map[string]any)["condition"].(map[string]any)["compositeQuery"].(map[string]any)
+			composite["queries"] = []any{}
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+			return err
+		}},
+		{name: "missing alert thresholds", fixture: "testdata/alert-success.json", mutate: func(value map[string]any) {
+			condition := value["data"].(map[string]any)["condition"].(map[string]any)
+			condition["thresholds"] = map[string]any{"spec": []any{}}
+		}, get: func(client *HTTPClient) error {
+			_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := readPayload(t, test.fixture)
+			test.mutate(value)
+			if err := test.get(serve(t, value)); !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("error = %v, want typed invalid response", err)
+			}
+		})
+	}
+}
+
 func TestQueryRequestOmitsResponseOnlyNodes(t *testing.T) {
 	request, err := newQueryRequest(BuilderQueryRequest{
 		Start: time.Now().Add(-time.Minute), End: time.Now(), Signal: "traces",

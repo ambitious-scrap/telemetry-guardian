@@ -29,6 +29,7 @@ cd "$ROOT"
 DEMO_DIR="$RUN_DIR/demo"
 PREV_DIR="$RUN_DIR/demo.prev"
 STAMP=$(date -u +%Y%m%d%H%M%S)
+QUERY_STEP_SECONDS=5
 GOCACHE=${GOCACHE:-/private/tmp/telemetry-guardian-gocache}
 export GOCACHE
 
@@ -95,6 +96,28 @@ timestamp() {
 	date -u -d "@$1" '+%Y-%m-%dT%H:%M:%SZ'
 }
 
+align_query_start() {
+	epoch=$1
+	printf '%s\n' "$((epoch - (epoch % QUERY_STEP_SECONDS)))"
+}
+
+assert_query_bucket_alignment() {
+	test_epoch=1700000000
+	offset=0
+	while [ "$offset" -lt "$QUERY_STEP_SECONDS" ]; do
+		candidate_epoch=$((test_epoch + offset))
+		aligned_epoch=$(align_query_start "$candidate_epoch")
+		expected_epoch=$((candidate_epoch - (candidate_epoch % QUERY_STEP_SECONDS)))
+		[ "$aligned_epoch" -eq "$expected_epoch" ] || return 1
+		[ "$aligned_epoch" -le "$candidate_epoch" ] || return 1
+		adjustment=$((candidate_epoch - aligned_epoch))
+		[ "$adjustment" -ge 0 ] && [ "$adjustment" -lt "$QUERY_STEP_SECONDS" ] || return 1
+		offset=$((offset + 1))
+	done
+}
+
+assert_query_bucket_alignment
+
 wait_for_alert_bucket() {
 	deadline=$(($(date +%s) + 65))
 	while :; do
@@ -153,7 +176,9 @@ inject_fault() {
 	label=$1
 	telemetry_variant=$2
 	reset_alert_events "$label"
-	start=$(timestamp "$(date +%s)")
+	now_epoch=$(date +%s)
+	start_epoch=$((now_epoch - (now_epoch % QUERY_STEP_SECONDS)))
+	start=$(timestamp "$start_epoch")
 	run_step ./scripts/load/generate.sh 5 || fail "workload generation failed for $label"
 	wait_for_alert_bucket
 	fault_epoch=$(date +%s)
