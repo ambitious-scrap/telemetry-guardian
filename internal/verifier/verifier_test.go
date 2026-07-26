@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -111,6 +112,143 @@ func TestMissingAlertHistoryIsInconclusive(t *testing.T) {
 	}
 }
 
+func TestAlertHistoryFollowsBoundedCursors(t *testing.T) {
+	start := time.UnixMilli(1700000000000)
+	end := start.Add(time.Minute)
+	stale := signoz.AlertHistoryItem{ID: "stale", State: "firing", Timestamp: start.UnixMilli()}
+	fresh := signoz.AlertHistoryItem{ID: "fresh", State: "firing", Timestamp: start.Add(time.Second).UnixMilli()}
+
+	tests := []struct {
+		name       string
+		pages      map[string]signoz.AlertHistory
+		wantItems  int
+		wantCursor []string
+		wantError  string
+	}{
+		{
+			name: "fresh event on page two",
+			pages: map[string]signoz.AlertHistory{
+				"":       {NextCursor: "page-2"},
+				"page-2": {Items: []signoz.AlertHistoryItem{fresh}},
+			},
+			wantItems:  1,
+			wantCursor: []string{"", "page-2"},
+		},
+		{
+			name: "stale first page and fresh second page",
+			pages: map[string]signoz.AlertHistory{
+				"":       {Items: []signoz.AlertHistoryItem{stale}, NextCursor: "page-2"},
+				"page-2": {Items: []signoz.AlertHistoryItem{fresh}},
+			},
+			wantItems:  2,
+			wantCursor: []string{"", "page-2"},
+		},
+		{
+			name: "empty terminal cursor",
+			pages: map[string]signoz.AlertHistory{
+				"": {Items: []signoz.AlertHistoryItem{stale}},
+			},
+			wantItems:  1,
+			wantCursor: []string{""},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &historyPaginationClient{pages: test.pages}
+			got, err := alertHistory(context.Background(), client, "alert", start, end, time.Second)
+			if (test.wantError == "") != (err == nil) {
+				t.Fatalf("error = %v, want error %q", err, test.wantError)
+			}
+			if err != nil {
+				return
+			}
+			if len(got.Items) != test.wantItems {
+				t.Fatalf("items = %d, want %d", len(got.Items), test.wantItems)
+			}
+			if len(client.requests) != len(test.wantCursor) {
+				t.Fatalf("requests = %#v, want cursors %#v", client.requests, test.wantCursor)
+			}
+			for index, request := range client.requests {
+				if request.Cursor != test.wantCursor[index] {
+					t.Fatalf("request %d cursor = %q, want %q", index, request.Cursor, test.wantCursor[index])
+				}
+			}
+		})
+	}
+}
+
+func TestAlertHistoryPaginationRejectsLoopsAndPageBudget(t *testing.T) {
+	start := time.UnixMilli(1700000000000)
+	end := start.Add(time.Minute)
+	t.Run("repeated cursor", func(t *testing.T) {
+		client := &historyPaginationClient{pages: map[string]signoz.AlertHistory{
+			"":     {NextCursor: "loop"},
+			"loop": {NextCursor: "loop"},
+		}}
+		_, err := alertHistory(context.Background(), client, "alert", start, end, time.Second)
+		if !errors.Is(err, signoz.ErrInvalidResponse) || !strings.Contains(err.Error(), "cursor loop") {
+			t.Fatalf("error = %v, want typed cursor-loop invalid response", err)
+		}
+	})
+
+	t.Run("page budget exhaustion", func(t *testing.T) {
+		pages := make(map[string]signoz.AlertHistory, maxAlertHistoryPages)
+		cursor := ""
+		for index := 0; index < maxAlertHistoryPages; index++ {
+			next := fmt.Sprintf("page-%d", index+1)
+			pages[cursor] = signoz.AlertHistory{NextCursor: next}
+			cursor = next
+		}
+		client := &historyPaginationClient{pages: pages}
+		_, err := alertHistory(context.Background(), client, "alert", start, end, time.Second)
+		if !errors.Is(err, signoz.ErrInvalidResponse) || !strings.Contains(err.Error(), "page budget") {
+			t.Fatalf("error = %v, want typed page-budget invalid response", err)
+		}
+		if len(client.requests) != maxAlertHistoryPages {
+			t.Fatalf("requests = %d, want bounded %d", len(client.requests), maxAlertHistoryPages)
+		}
+	})
+}
+
+func TestAlertHistoryPaginationTimeoutAndCancellation(t *testing.T) {
+	start := time.UnixMilli(1700000000000)
+	end := start.Add(time.Minute)
+	client := &historyPaginationClient{block: true}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := alertHistory(canceled, client, "alert", start, end, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v", err)
+	}
+
+	timedOut, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := alertHistory(timedOut, client, "alert", start, end, time.Second); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v", err)
+	}
+}
+
+func TestAlertHistoryPaginationFailureIsInconclusive(t *testing.T) {
+	config := testConfig()
+	contract := loadFixtureContract(t)
+	pages := make(map[string]signoz.AlertHistory, maxAlertHistoryPages)
+	cursor := ""
+	for index := 0; index < maxAlertHistoryPages; index++ {
+		next := fmt.Sprintf("page-%d", index+1)
+		pages[cursor] = signoz.AlertHistory{NextCursor: next}
+		cursor = next
+	}
+	client := &historyPaginationClient{
+		pages:       pages,
+		traceResult: queryResultAt(5, config.FaultInjectedAt.Add(time.Second)),
+	}
+	result := verifyAlert(context.Background(), client, contract, *checkByID(&contract, "alert-must-fire-payment-timeout"), config)
+	if result.State != evidence.Inconclusive || result.Evidence.DataQuality != evidence.Error {
+		t.Fatalf("result = %#v, want INCONCLUSIVE error evidence", result)
+	}
+}
+
 func TestPermanentAndInfrastructureErrorsAreNotRetriedOrPassed(t *testing.T) {
 	tests := []struct {
 		name string
@@ -189,6 +327,13 @@ func TestInvalidContractAndConfiguration(t *testing.T) {
 	config.RunID = "unsafe run"
 	if _, err := Verify(context.Background(), &scenarioClient{}, loadFixtureContract(t), config); !errors.Is(err, contracts.ErrInvalidContract) {
 		t.Fatalf("invalid config error = %v", err)
+	}
+}
+
+func TestNilVerifierContextIsTypedInvalidInput(t *testing.T) {
+	_, err := Verify(nil, &scenarioClient{}, loadFixtureContract(t), testConfig())
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("error = %v, want typed invalid verifier input", err)
 	}
 }
 
@@ -384,6 +529,51 @@ type scenarioClient struct {
 	filters         []string
 	traceCalls      int
 	historyRequests []signoz.AlertHistoryRequest
+}
+
+type historyPaginationClient struct {
+	pages       map[string]signoz.AlertHistory
+	requests    []signoz.AlertHistoryRequest
+	block       bool
+	traceResult signoz.QueryResult
+}
+
+func (client *historyPaginationClient) GetDashboard(context.Context, string) (signoz.Dashboard, error) {
+	return signoz.Dashboard{}, nil
+}
+
+func (client *historyPaginationClient) GetAlert(ctx context.Context, id string) (signoz.Alert, error) {
+	if err := ctx.Err(); err != nil {
+		return signoz.Alert{}, err
+	}
+	return signoz.Alert{ID: id}, nil
+}
+
+func (client *historyPaginationClient) ExecuteBuilderQuery(context.Context, signoz.BuilderQueryRequest) (signoz.QueryResult, error) {
+	return signoz.QueryResult{}, nil
+}
+
+func (client *historyPaginationClient) SearchTraces(ctx context.Context, _ signoz.SearchRequest) (signoz.QueryResult, error) {
+	if err := ctx.Err(); err != nil {
+		return signoz.QueryResult{}, err
+	}
+	return client.traceResult, nil
+}
+
+func (client *historyPaginationClient) SearchLogs(context.Context, signoz.SearchRequest) (signoz.QueryResult, error) {
+	return signoz.QueryResult{}, nil
+}
+
+func (client *historyPaginationClient) GetAlertHistory(ctx context.Context, _ string, request signoz.AlertHistoryRequest) (signoz.AlertHistory, error) {
+	client.requests = append(client.requests, request)
+	if client.block {
+		<-ctx.Done()
+		return signoz.AlertHistory{}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return signoz.AlertHistory{}, err
+	}
+	return client.pages[request.Cursor], nil
 }
 
 func (client *scenarioClient) GetDashboard(context.Context, string) (signoz.Dashboard, error) {

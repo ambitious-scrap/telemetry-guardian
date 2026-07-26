@@ -668,3 +668,32 @@ above remain unchanged.
 The hosted healthy-workflow limitation remains **PARTIAL** because the
 externally reachable `SIGNOZ_URL` and `SIGNOZ_TOKEN` repository configuration
 is still absent. P1 and P2 findings remain deferred; no stretch work was begun.
+
+## 15. Selected P1 resolution pass
+
+The following approved P1 corrections were implemented without changing the
+protected Phase 6 path. The original audit findings above remain preserved;
+unselected P1 and all P2 findings remain deferred.
+
+| Finding | Resolution evidence | Validation | Status |
+|---|---|---|---|
+| P1-2 bounded alert-history pagination | `internal/verifier/verifier.go` follows `NextCursor` with a five-page bound, repeated-cursor detection, a single query timeout context, and fresh-event short-circuiting. | Verifier tests cover page-two fresh events, stale-plus-fresh pages, terminal cursors, loops, page budgets, cancellation, timeout, and INCONCLUSIVE mapping; Phase 4 acceptance passed. | RESOLVED |
+| P1-5 semantic success-envelope validation | `internal/signoz/client.go` validates required dashboard identity/title/widgets, supported widget queries, alert identity/composite query, supported alert query, and canonical threshold fields while retaining permissive top-level metadata decoding. | Sanitized success mutations cover missing identities, widgets, queries, composite query, and thresholds; typed `ErrInvalidResponse` assertions and existing fixtures pass. | RESOLVED |
+| P1-6 CI artifact integrity | `scripts/ci/guardian.sh` clears stale outputs, stages and publishes artifacts, validates current verdicts before report generation, and emits fresh exit-3 diagnostics. | `scripts/accept/phase5.sh` covers all exit classes, stale outputs, missing fixtures, malformed verdicts, report failure, retention, and classifications; Phase 5 acceptance passed. | RESOLVED |
+| P1-8 runtime secret files and exporter bodies | `scripts/seed/auth.sh` applies `umask 077` and explicit `0600` modes to credential-bearing files; `demo/checkout/main.go` logs only safe OTLP status classifications. | Checkout exporter regression test and Phase 5 shell assertions prove raw response bodies are omitted and private-file safeguards are present. | RESOLVED |
+| P1-9 malformed input/state validation | `cmd/guardian/main.go` rejects trailing JSON; `internal/verifier/verifier.go` rejects nil contexts with `ErrInvalidInput`; report construction rejects unknown or empty aggregate/check states. | CLI, verifier, evidence, and report regression tests cover trailing input, nil context, unknown/empty states, and precedence. | RESOLVED |
+| P1-10 honest INCONCLUSIVE graph relationships | `internal/report/report.go` emits `UNRESOLVED` for INCONCLUSIVE requirement-to-consumer edges and preserves `BREAKS` for FAIL. | Report tests and Phase 5 acceptance verify deterministic neutral relationships and distinct healthy/inconclusive output. | RESOLVED |
+
+Focused offline tests, formatting, lint, repository tests, Phase 4
+acceptance, and Phase 5 acceptance passed. Phase 2 acceptance reached the
+live adapter but its standalone filtered builder-query smoke was rejected by
+the current instance as `invalid_input`; a focused safe probe reproduced that
+nonempty-filter compatibility issue while an empty-filter request succeeded.
+No adapter query breadth or deferred P1-11 image pinning was changed. The
+required `make demo-smoke` run was therefore not started. `demo-freeze` was
+not moved or recreated.
+
+### Deferred after selected P1 pass
+
+P1-1, P1-3, P1-4, P1-7, P1-11, P1-12, and every P2 finding remain deferred.
+No stretch work or Phase 8 work began.

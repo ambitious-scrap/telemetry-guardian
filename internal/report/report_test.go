@@ -103,8 +103,25 @@ func TestHealthyAndInconclusiveStatesAreDistinct(t *testing.T) {
 		t.Fatal(err)
 	}
 	inconclusiveHTML, _ := render(inconclusive)
-	if !strings.Contains(inconclusiveHTML, "VERIFICATION_INCONCLUSIVE") || strings.Contains(inconclusiveHTML, "contract healthy") {
+	if !strings.Contains(inconclusiveHTML, "VERIFICATION_INCONCLUSIVE") || strings.Contains(inconclusiveHTML, "contract healthy") || !strings.Contains(inconclusiveHTML, "UNRESOLVED") {
 		t.Fatal("inconclusive report was presented as healthy")
+	}
+	for _, edge := range inconclusive.Edges {
+		if edge.Label == "BREAKS" {
+			t.Fatalf("inconclusive edge = %#v, want neutral relationship", edge)
+		}
+	}
+}
+
+func TestReportRejectsUnknownOverallState(t *testing.T) {
+	verdict := fixtureVerdict(evidence.Pass)
+	verdict.Overall = ""
+	if _, err := Build(verdict, fixtureContract()); !errors.Is(err, ErrInvalidReport) {
+		t.Fatalf("error = %v, want invalid report", err)
+	}
+	verdict.Overall = "UNKNOWN"
+	if _, err := Build(verdict, fixtureContract()); !errors.Is(err, ErrInvalidReport) {
+		t.Fatalf("error = %v, want invalid report", err)
 	}
 }
 

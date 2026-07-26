@@ -187,3 +187,38 @@ deferred. Deferred ideas are recorded in `docs/ROADMAP.md`.
   no-load, and invalid-contract outcomes after one focused timestamp probe.
 - Phase 6 demo and Phase 6 acceptance were not rerun. `demo-freeze` remains
   unchanged. P1 and P2 review findings remain deferred.
+
+## Phase 7 selected P1 hardening
+
+- P1-2 is corrected: alert-history retrieval follows returned cursors with a
+  five-page bound, repeated-cursor detection, one bounded query context, and
+  explicit INCONCLUSIVE results for cursor loops, exhausted page budgets, and
+  cancellation or timeout.
+- P1-5 is corrected: successful dashboard and alert responses validate only
+  the supported MVP identity, dependency-query, composite-query, and
+  threshold structures; malformed success envelopes return typed
+  `ErrInvalidResponse` while harmless resource metadata remains accepted.
+- P1-6 is corrected: CI artifacts are cleared and staged per run, fixture
+  copies are checked, verdicts and reports are validated before exit 0, and
+  exit 3 writes fresh invalid-configuration diagnostics. Phase 5 fixture
+  acceptance covers stale, missing, malformed, and report-failure cases.
+- P1-8 is corrected: registration, login, session, and token files use mode
+  `0600`; the checkout exporter reports only safe OTLP path/status/classification
+  information and never includes raw response bodies.
+- P1-9 is corrected: report input rejects trailing JSON and unknown or empty
+  verdict states, and `verifier.Verify` returns typed invalid input for a nil
+  context without panicking.
+- P1-10 is corrected: FAIL graph dependencies retain `BREAKS`, while
+  INCONCLUSIVE dependencies use deterministic `UNRESOLVED` relationships.
+- Focused package tests, `make fmt-check`, `make lint`, `make test`, shell
+  syntax validation, and Phase 5 acceptance passed. The single Phase 4
+  acceptance run passed all healthy, broken, no-load, and invalid-contract
+  scenarios.
+- Phase 2 acceptance reached the live adapter but failed its standalone
+  filtered builder query with SigNoz `invalid_input`; a focused probe showed
+  the current instance accepts the same request only with an empty filter.
+  This is an environment/API compatibility issue outside the selected P1
+  scope; no query breadth or image pinning change was made. `make demo-smoke`
+  was not run because the required live validation set was not fully green.
+- `demo-freeze` remains unchanged. P1-1, P1-3, P1-4, P1-7, P1-11, P1-12,
+  and all P2 findings remain deferred. No Phase 6 demo was rerun.

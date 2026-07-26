@@ -173,6 +173,50 @@ func TestReportContradictoryVerdictExitsThreeWithoutHTML(t *testing.T) {
 	}
 }
 
+func TestReportRejectsTrailingJSONWithoutWritingHTML(t *testing.T) {
+	contractPath := filepath.Join("..", "..", "contracts", "telemetry.guardian.yaml")
+	fixturePath := filepath.Join("..", "..", "internal", "report", "testdata", "healthy.json")
+	payload, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdictPath := filepath.Join(t.TempDir(), "verdict.json")
+	if err := os.WriteFile(verdictPath, append(payload, []byte("\n{}\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "report.html")
+	var stdout, stderr bytes.Buffer
+	code := execute([]string{"report", "--contract", contractPath, "--verdict", verdictPath, "--output", output}, &stdout, &stderr)
+	if code != 3 || !strings.Contains(stderr.String(), "trailing JSON") {
+		t.Fatalf("exit/stderr = %d/%s, want exit 3 with trailing JSON error", code, stderr.String())
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("report output exists after trailing JSON: stat error=%v", err)
+	}
+}
+
+func TestReportRejectsUnknownVerdictStateWithoutWritingHTML(t *testing.T) {
+	value := loadGuardianTestJSON(t, filepath.Join("..", "..", "internal", "report", "testdata", "healthy.json"))
+	value["overall_state"] = "UNKNOWN"
+	payload, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdictPath := filepath.Join(t.TempDir(), "verdict.json")
+	if err := os.WriteFile(verdictPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "report.html")
+	var stdout, stderr bytes.Buffer
+	code := execute([]string{"report", "--contract", filepath.Join("..", "..", "contracts", "telemetry.guardian.yaml"), "--verdict", verdictPath, "--output", output}, &stdout, &stderr)
+	if code != 3 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("report output exists for unknown state: stat error=%v", err)
+	}
+}
+
 func loadGuardianTestJSON(t *testing.T, path string) map[string]any {
 	t.Helper()
 	payload, err := os.ReadFile(path)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,5 +51,22 @@ func TestVariantsDifferOnlyInCanonicalTelemetry(t *testing.T) {
 	}
 	if os.Getenv("RUN_ID") != "test-run" {
 		t.Fatal("run ID changed")
+	}
+}
+
+func TestExporterErrorDoesNotExposeRawResponseBody(t *testing.T) {
+	const secret = "private-exporter-response"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusBadGateway)
+		_, _ = response.Write([]byte(secret))
+	}))
+	defer server.Close()
+
+	err := (exporter{endpoint: server.URL, client: server.Client()}).post(context.Background(), "/v1/traces", map[string]string{"payload": "fixture"})
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("exporter error = %v, raw response body was exposed", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), "server-error") {
+		t.Fatalf("exporter error = %v, want safe status/classification", err)
 	}
 }

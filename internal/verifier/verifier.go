@@ -19,6 +19,13 @@ const (
 	defaultCompletenessWindow = 10 * time.Second
 	defaultQueryTimeout       = 10 * time.Second
 	minimumQueryWindow        = 5 * time.Second
+	maxAlertHistoryPages      = 5
+)
+
+var (
+	ErrInvalidInput           = errors.New("invalid verifier input")
+	errAlertHistoryCursorLoop = errors.New("alert history cursor loop")
+	errAlertHistoryPageBudget = errors.New("alert history page budget exhausted")
 )
 
 type Config struct {
@@ -34,6 +41,9 @@ type Config struct {
 }
 
 func Verify(ctx context.Context, client signoz.SigNozClient, contract contracts.Contract, config Config) (evidence.Verdict, error) {
+	if ctx == nil {
+		return evidence.Verdict{}, fmt.Errorf("%w: context is required", ErrInvalidInput)
+	}
 	if err := contract.Validate(); err != nil {
 		return evidence.Verdict{}, err
 	}
@@ -528,11 +538,55 @@ func getAlert(ctx context.Context, client signoz.SigNozClient, id string, timeou
 }
 
 func alertHistory(ctx context.Context, client signoz.SigNozClient, id string, start, end time.Time, timeout time.Duration) (signoz.AlertHistory, error) {
+	if ctx == nil {
+		return signoz.AlertHistory{}, fmt.Errorf("%w: context is required", ErrInvalidInput)
+	}
 	queryContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return client.GetAlertHistory(queryContext, id, signoz.AlertHistoryRequest{
-		Start: start.Add(time.Millisecond), End: end, Limit: 100, Order: "asc", State: "firing",
-	})
+
+	result := signoz.AlertHistory{}
+	seenCursors := make(map[string]struct{}, maxAlertHistoryPages)
+	cursor := ""
+	for page := 0; page < maxAlertHistoryPages; page++ {
+		if err := queryContext.Err(); err != nil {
+			return signoz.AlertHistory{}, err
+		}
+		pageResult, err := client.GetAlertHistory(queryContext, id, signoz.AlertHistoryRequest{
+			Start: start.Add(time.Millisecond), End: end, Limit: 100, Order: "asc", State: "firing", Cursor: cursor,
+		})
+		if err != nil {
+			return signoz.AlertHistory{}, err
+		}
+		result.Items = append(result.Items, pageResult.Items...)
+		result.Total = pageResult.Total
+		result.NextCursor = pageResult.NextCursor
+		if hasFreshFiringEvent(pageResult.Items, start, end) {
+			return result, nil
+		}
+
+		nextCursor := pageResult.NextCursor
+		if strings.TrimSpace(nextCursor) == "" {
+			result.NextCursor = ""
+			return result, nil
+		}
+		if _, exists := seenCursors[nextCursor]; exists {
+			return signoz.AlertHistory{}, fmt.Errorf("%w: %w", signoz.ErrInvalidResponse, errAlertHistoryCursorLoop)
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
+	}
+
+	return signoz.AlertHistory{}, fmt.Errorf("%w: %w", signoz.ErrInvalidResponse, errAlertHistoryPageBudget)
+}
+
+func hasFreshFiringEvent(items []signoz.AlertHistoryItem, start, end time.Time) bool {
+	for _, item := range items {
+		eventTime, ok := alertEventTime(item)
+		if ok && eventTime.After(start) && !eventTime.After(end) && strings.EqualFold(item.State, "firing") {
+			return true
+		}
+	}
+	return false
 }
 
 func alertEventTime(item signoz.AlertHistoryItem) (time.Time, bool) {
