@@ -2,7 +2,7 @@ SHELL := /bin/sh
 RUN_ID ?= phase1-local
 GO_CACHE ?= /private/tmp/telemetry-guardian-gocache
 
-.PHONY: fmt-check lint test signoz-test signoz-integration miner-test verifier-test report-test integration-test accept-phase0 accept-phase1 accept-phase2 accept-phase3 accept-phase4 accept-phase5 mine verify report env-up env-ready env-down deploy-healthy deploy-broken seed load fault
+.PHONY: fmt-check lint test signoz-test signoz-integration miner-test verifier-test report-test integration-test accept-phase0 accept-phase1 accept-phase2 accept-phase3 accept-phase4 accept-phase5 accept-phase6 demo demo-smoke mine verify report env-up env-ready env-down deploy-healthy deploy-broken seed load fault
 
 fmt-check:
 	git diff --check
@@ -50,6 +50,15 @@ accept-phase4: fmt-check test
 
 accept-phase5: fmt-check test
 	./scripts/accept/phase5.sh
+
+accept-phase6: fmt-check test
+	./scripts/accept/phase6.sh
+
+demo:
+	./scripts/demo.sh
+
+demo-smoke:
+	./scripts/demo.sh --smoke
 
 mine:
 	GOCACHE=$(GO_CACHE) go run ./cmd/guardian mine
