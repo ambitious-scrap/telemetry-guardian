@@ -91,6 +91,13 @@ func Build(verdict evidence.Verdict, contract contracts.Contract) (Document, err
 		return Document{}, fmt.Errorf("%w: verdict has %d checks, contract requires %d", ErrInvalidReport, len(checks), len(contract.Checks))
 	}
 	sort.Slice(checks, func(i, j int) bool { return checks[i].RequirementID < checks[j].RequirementID })
+	expectedState, err := aggregateReportState(checks)
+	if err != nil {
+		return Document{}, err
+	}
+	if verdict.Overall != expectedState {
+		return Document{}, fmt.Errorf("%w: declared overall state %q does not match check states", ErrInvalidReport, verdict.Overall)
+	}
 	seenChecks := make(map[string]struct{}, len(checks))
 	document := Document{
 		State:          string(verdict.Overall),
@@ -156,6 +163,27 @@ func Build(verdict evidence.Verdict, contract contracts.Contract) (Document, err
 	}
 	finalizeNodes(&document)
 	return document, nil
+}
+
+func aggregateReportState(checks []evidence.CheckResult) (evidence.State, error) {
+	if len(checks) == 0 {
+		return "", fmt.Errorf("%w: verdict has no check states", ErrInvalidReport)
+	}
+	state := evidence.Pass
+	for _, check := range checks {
+		switch check.State {
+		case evidence.Pass:
+		case evidence.Fail:
+			if state != evidence.Inconclusive {
+				state = evidence.Fail
+			}
+		case evidence.Inconclusive:
+			state = evidence.Inconclusive
+		default:
+			return "", fmt.Errorf("%w: check %q has unsupported state", ErrInvalidReport, check.RequirementID)
+		}
+	}
+	return state, nil
 }
 
 func RenderHTML(writer io.Writer, document Document) error {

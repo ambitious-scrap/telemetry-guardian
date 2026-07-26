@@ -303,6 +303,80 @@ func TestDashboardAcceptsEmptyObjectHaving(t *testing.T) {
 	}
 }
 
+func TestHTTPClientStrictlyDecodesDependencyQueries(t *testing.T) {
+	readPayload := func(t *testing.T, name string) map[string]any {
+		t.Helper()
+		payload, err := fixtureFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(payload, &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	serve := func(t *testing.T, value map[string]any) *HTTPClient {
+		t.Helper()
+		payload, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write(payload)
+		}))
+		t.Cleanup(server.Close)
+		client, err := NewHTTPClient(Config{BaseURL: server.URL, Timeout: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+
+	t.Run("unknown dashboard query key is invalid response", func(t *testing.T) {
+		value := readPayload(t, "testdata/dashboard-success.json")
+		data := value["data"].(map[string]any)
+		dashboard := data["data"].(map[string]any)
+		widget := dashboard["widgets"].([]any)[0].(map[string]any)
+		query := widget["query"].(map[string]any)
+		query["unknownQueryNode"] = true
+		client := serve(t, value)
+		_, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+		if !errors.Is(err, ErrInvalidResponse) || !strings.Contains(err.Error(), "query") {
+			t.Fatalf("error = %v, want typed query invalid response", err)
+		}
+		if strings.Contains(err.Error(), "unknownQueryNode") {
+			t.Fatalf("error exposed raw query content: %v", err)
+		}
+	})
+
+	t.Run("unknown alert query key is invalid response", func(t *testing.T) {
+		value := readPayload(t, "testdata/alert-success.json")
+		data := value["data"].(map[string]any)
+		condition := data["condition"].(map[string]any)
+		composite := condition["compositeQuery"].(map[string]any)
+		query := composite["queries"].([]any)[0].(map[string]any)
+		spec := query["spec"].(map[string]any)
+		spec["unknownDependencyNode"] = true
+		client := serve(t, value)
+		_, err := client.GetAlert(context.Background(), "alert-fixture-id")
+		if !errors.Is(err, ErrInvalidResponse) || !strings.Contains(err.Error(), "query") {
+			t.Fatalf("error = %v, want typed query invalid response", err)
+		}
+	})
+
+	t.Run("unknown response metadata remains accepted", func(t *testing.T) {
+		value := readPayload(t, "testdata/dashboard-success.json")
+		value["futureMetadata"] = map[string]any{"provider": "signoz"}
+		client := serve(t, value)
+		dashboard, err := client.GetDashboard(context.Background(), "dashboard-fixture-id")
+		if err != nil || dashboard.ID != "dashboard-fixture-id" {
+			t.Fatalf("dashboard = %#v, err = %v", dashboard, err)
+		}
+	})
+}
+
 func TestQueryRequestOmitsResponseOnlyNodes(t *testing.T) {
 	request, err := newQueryRequest(BuilderQueryRequest{
 		Start: time.Now().Add(-time.Minute), End: time.Now(), Signal: "traces",

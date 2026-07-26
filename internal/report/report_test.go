@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,32 @@ func TestHealthyAndInconclusiveStatesAreDistinct(t *testing.T) {
 	inconclusiveHTML, _ := render(inconclusive)
 	if !strings.Contains(inconclusiveHTML, "VERIFICATION_INCONCLUSIVE") || strings.Contains(inconclusiveHTML, "contract healthy") {
 		t.Fatal("inconclusive report was presented as healthy")
+	}
+}
+
+func TestBuildRejectsContradictoryVerdictAggregates(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared evidence.State
+		mutate   func([]evidence.CheckResult)
+	}{
+		{name: "pass with fail", declared: evidence.Pass, mutate: func(results []evidence.CheckResult) { results[0].State = evidence.Fail }},
+		{name: "pass with inconclusive", declared: evidence.Pass, mutate: func(results []evidence.CheckResult) { results[0].State = evidence.Inconclusive }},
+		{name: "fail with all pass", declared: evidence.Fail, mutate: func([]evidence.CheckResult) {}},
+		{name: "fail with inconclusive", declared: evidence.Fail, mutate: func(results []evidence.CheckResult) { results[0].State = evidence.Inconclusive }},
+		{name: "inconclusive with all pass", declared: evidence.Inconclusive, mutate: func([]evidence.CheckResult) {}},
+		{name: "empty check state", declared: evidence.Pass, mutate: func(results []evidence.CheckResult) { results[0].State = "" }},
+		{name: "unknown check state", declared: evidence.Pass, mutate: func(results []evidence.CheckResult) { results[0].State = "UNKNOWN" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			verdict := fixtureVerdict(evidence.Pass)
+			verdict.Overall = test.declared
+			test.mutate(verdict.CheckResults)
+			if _, err := Build(verdict, fixtureContract()); !errors.Is(err, ErrInvalidReport) {
+				t.Fatalf("error = %v, want invalid report", err)
+			}
+		})
 	}
 }
 

@@ -192,6 +192,131 @@ func TestInvalidContractAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestCanonicalCheckIDsAreBoundToExactSemantics(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*contracts.Contract)
+	}{
+		{name: "signal", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-cart-value").Signal = "logs"
+		}},
+		{name: "field", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-cart-value").Field = "cart.amount"
+		}},
+		{name: "operation", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-operation-payment-authorize").Operation = "payment.capture"
+		}},
+		{name: "alert ID", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "alert-must-fire-payment-timeout").AlertID = "other-alert"
+		}},
+		{name: "timeout", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "alert-must-fire-payment-timeout").Timeout = "61s"
+		}},
+		{name: "service filter", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-cart-value").Filter = "service.name = 'other' AND run.id = '__RUN_ID__'"
+		}},
+		{name: "missing run filter", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-cart-value").Filter = "service.name = 'checkout'"
+		}},
+		{name: "wrong error value", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-error-type").Filter = "service.name = 'checkout' AND run.id = '__RUN_ID__' AND error.type = 'other'"
+		}},
+		{name: "unexpected extra filter", mutate: func(contract *contracts.Contract) {
+			checkByID(contract, "required-field-cart-value").Filter += " AND region = 'us-east-1'"
+		}},
+		{name: "duplicate check ID", mutate: func(contract *contracts.Contract) {
+			contract.Checks[len(contract.Checks)-1].ID = contract.Checks[0].ID
+		}},
+		{name: "missing canonical check", mutate: func(contract *contracts.Contract) {
+			contract.Checks[len(contract.Checks)-1].ID = "unknown-check"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			contract := loadFixtureContract(t)
+			test.mutate(&contract)
+			client := &scenarioClient{}
+			_, err := Verify(context.Background(), client, contract, testConfig())
+			if !errors.Is(err, contracts.ErrInvalidContract) {
+				t.Fatalf("error = %v, want invalid contract", err)
+			}
+			if client.traceCalls != 0 || len(client.historyRequests) != 0 {
+				t.Fatalf("invalid contract started queries: traces=%d history=%d", client.traceCalls, len(client.historyRequests))
+			}
+		})
+	}
+}
+
+func TestCanonicalFilterOrderIsComparedSemantically(t *testing.T) {
+	contract := loadFixtureContract(t)
+	check := checkByID(&contract, "required-field-cart-value")
+	reordered := "run.id = '__RUN_ID__' AND service.name = 'checkout'"
+	check.Filter = reordered
+	check.Filters = []string{reordered}
+	config := testConfig()
+	client := &scenarioClient{mode: "healthy", fault: config.FaultInjectedAt}
+	verdict, err := Verify(context.Background(), client, contract, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Overall != evidence.Pass || client.traceCalls == 0 {
+		t.Fatalf("reordered canonical filter verdict/calls = %s/%d", verdict.Overall, client.traceCalls)
+	}
+}
+
+func TestTraceCountEnforcesInclusiveReturnedPointWindow(t *testing.T) {
+	start := time.UnixMilli(1700000000000)
+	end := time.UnixMilli(1700000005000)
+	tests := []struct {
+		name   string
+		points []signoz.QueryPoint
+		want   int
+	}{
+		{name: "before start", points: []signoz.QueryPoint{{Timestamp: start.Add(-time.Millisecond).UnixMilli(), Value: 4}}, want: 0},
+		{name: "after end", points: []signoz.QueryPoint{{Timestamp: end.Add(time.Millisecond).UnixMilli(), Value: 4}}, want: 0},
+		{name: "at start", points: []signoz.QueryPoint{{Timestamp: start.UnixMilli(), Value: 3}}, want: 3},
+		{name: "at end", points: []signoz.QueryPoint{{Timestamp: end.UnixMilli(), Value: 4}}, want: 4},
+		{name: "mixed", points: []signoz.QueryPoint{{Timestamp: start.Add(-time.Millisecond).UnixMilli(), Value: 2}, {Timestamp: start.UnixMilli(), Value: 3}, {Timestamp: end.UnixMilli(), Value: 4}, {Timestamp: end.Add(time.Millisecond).UnixMilli(), Value: 5}}, want: 7},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &scenarioClient{traceResult: queryResultPointer(test.points...)}
+			got, err := traceCount(context.Background(), client, start, end, "service.name = 'checkout'", "count()", time.Second)
+			if err != nil || got != test.want {
+				t.Fatalf("count = %d, err = %v, want %d", got, err, test.want)
+			}
+		})
+	}
+
+	client := &scenarioClient{traceResult: queryResultPointer(signoz.QueryPoint{Timestamp: 0, Value: 1})}
+	if _, err := traceCount(context.Background(), client, start, end, "service.name = 'checkout'", "count()", time.Second); !errors.Is(err, signoz.ErrInvalidResponse) {
+		t.Fatalf("zero timestamp error = %v, want invalid response", err)
+	}
+}
+
+func TestStalePositivePointsCannotEstablishCurrentTelemetry(t *testing.T) {
+	config := testConfig()
+	config.CompletenessTimeout = time.Millisecond
+	config.PollInterval = time.Millisecond
+	client := &scenarioClient{mode: "stale-window", fault: config.FaultInjectedAt}
+	verdict, err := Verify(context.Background(), client, loadFixtureContract(t), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Overall != evidence.Inconclusive || verdict.ExitCode() != 2 {
+		t.Fatalf("stale positive verdict = %s/%d, want inconclusive/2", verdict.Overall, verdict.ExitCode())
+	}
+}
+
+func checkByID(contract *contracts.Contract, id string) *contracts.Requirement {
+	for index := range contract.Checks {
+		if contract.Checks[index].ID == id {
+			return &contract.Checks[index]
+		}
+	}
+	panic("test contract check not found: " + id)
+}
+
 func TestVerdictJSONContainsCompleteEvidenceAndNoSecret(t *testing.T) {
 	const secret = "phase4-super-secret"
 	config := testConfig()
@@ -255,6 +380,7 @@ type scenarioClient struct {
 	traceErr        error
 	historyErr      error
 	deepLink        string
+	traceResult     *signoz.QueryResult
 	filters         []string
 	traceCalls      int
 	historyRequests []signoz.AlertHistoryRequest
@@ -284,6 +410,9 @@ func (client *scenarioClient) SearchTraces(ctx context.Context, request signoz.S
 	if client.traceErr != nil {
 		return signoz.QueryResult{}, client.traceErr
 	}
+	if client.traceResult != nil {
+		return *client.traceResult, nil
+	}
 	if client.mode == "eventual" && request.End.After(time.Now().Add(5*time.Millisecond)) {
 		return signoz.QueryResult{}, signoz.ErrInvalidRequest
 	}
@@ -311,7 +440,11 @@ func (client *scenarioClient) SearchTraces(ctx context.Context, request signoz.S
 	if strings.HasPrefix(request.Aggregations[0].Expression, "sum(") && value > 0 {
 		value = 210
 	}
-	return queryResult(value), nil
+	pointTime := request.End
+	if client.mode == "stale-window" {
+		pointTime = request.Start.Add(-time.Millisecond)
+	}
+	return queryResultAt(value, pointTime), nil
 }
 
 func (client *scenarioClient) SearchLogs(context.Context, signoz.SearchRequest) (signoz.QueryResult, error) {
@@ -343,14 +476,28 @@ func (client *scenarioClient) GetAlertHistory(ctx context.Context, _ string, req
 	}, nil
 }
 
-func queryResult(value float64) signoz.QueryResult {
+func queryResultAt(value float64, timestamp time.Time) signoz.QueryResult {
 	if value == 0 {
 		return signoz.QueryResult{}
 	}
 	return signoz.QueryResult{Results: []signoz.QuerySeries{{
 		QueryName: "A",
 		Aggregations: []signoz.QueryAggregation{{
-			Series: []signoz.QueryTimeSeries{{Values: []signoz.QueryPoint{{Value: value}}}},
+			Series: []signoz.QueryTimeSeries{{Values: []signoz.QueryPoint{{Timestamp: timestamp.UnixMilli(), Value: value}}}},
 		}},
 	}}}
+}
+
+func queryResultPoints(points ...signoz.QueryPoint) signoz.QueryResult {
+	return signoz.QueryResult{Results: []signoz.QuerySeries{{
+		QueryName: "A",
+		Aggregations: []signoz.QueryAggregation{{
+			Series: []signoz.QueryTimeSeries{{Values: points}},
+		}},
+	}}}
+}
+
+func queryResultPointer(points ...signoz.QueryPoint) *signoz.QueryResult {
+	result := queryResultPoints(points...)
+	return &result
 }

@@ -47,7 +47,7 @@ func Verify(ctx context.Context, client signoz.SigNozClient, contract contracts.
 	if !safeIdentifier(contract.Service) {
 		return evidence.Verdict{}, fmt.Errorf("%w: service must contain only letters, numbers, '.', '_', ':', or '-'", contracts.ErrInvalidContract)
 	}
-	if err := validateChecks(contract.Checks); err != nil {
+	if err := validateChecks(contract.Service, contract.Checks); err != nil {
 		return evidence.Verdict{}, err
 	}
 
@@ -102,7 +102,7 @@ func (config Config) validate() error {
 	return nil
 }
 
-func validateChecks(checks []contracts.Requirement) error {
+func validateChecks(service string, checks []contracts.Requirement) error {
 	expected := map[string]string{
 		"required-field-cart-value":            "required_field",
 		"required-field-error-type":            "required_field",
@@ -112,16 +112,183 @@ func validateChecks(checks []contracts.Requirement) error {
 	if len(checks) != len(expected) {
 		return fmt.Errorf("%w: Phase 4 requires exactly four canonical checks", contracts.ErrInvalidContract)
 	}
+	seen := make(map[string]struct{}, len(checks))
 	for _, check := range checks {
-		if expected[check.ID] != check.Type {
+		wantType, known := expected[check.ID]
+		if !known {
 			return fmt.Errorf("%w: unsupported Phase 4 check %q", contracts.ErrInvalidContract, check.ID)
 		}
-		if check.Type == "required_field" &&
-			(!strings.Contains(check.Filter, "run.id") || !strings.Contains(check.Filter, "__RUN_ID__")) {
-			return fmt.Errorf("%w: check %q is not isolated by the active run ID", contracts.ErrInvalidContract, check.ID)
+		if _, duplicate := seen[check.ID]; duplicate {
+			return fmt.Errorf("%w: duplicate Phase 4 check %q", contracts.ErrInvalidContract, check.ID)
+		}
+		seen[check.ID] = struct{}{}
+		if wantType != check.Type {
+			return fmt.Errorf("%w: unsupported Phase 4 check %q", contracts.ErrInvalidContract, check.ID)
+		}
+		switch check.ID {
+		case "required-field-cart-value":
+			if err := validateCanonicalFieldCheck(check, service, "cart.value", map[string]string{
+				"service.name": service,
+				"run.id":       "__RUN_ID__",
+			}); err != nil {
+				return err
+			}
+		case "required-field-error-type":
+			if err := validateCanonicalFieldCheck(check, service, "error.type", map[string]string{
+				"service.name": service,
+				"run.id":       "__RUN_ID__",
+				"error.type":   "payment_timeout",
+			}); err != nil {
+				return err
+			}
+		case "required-operation-payment-authorize":
+			if check.Signal != "traces" || check.Operation != "payment.authorize" || check.Field != "" || check.AlertID != "" || check.Timeout != "" || hasAnyFilter(check) {
+				return fmt.Errorf("%w: check %q does not match the canonical operation tuple", contracts.ErrInvalidContract, check.ID)
+			}
+		case "alert-must-fire-payment-timeout":
+			timeout, err := time.ParseDuration(check.Timeout)
+			if err != nil || timeout != time.Minute || check.AlertID != "payment-timeout" || check.Signal != "" || check.Field != "" || check.Operation != "" || hasAnyFilter(check) {
+				return fmt.Errorf("%w: check %q does not match the canonical alert tuple", contracts.ErrInvalidContract, check.ID)
+			}
+		}
+	}
+	for id := range expected {
+		if _, ok := seen[id]; !ok {
+			return fmt.Errorf("%w: missing canonical check %q", contracts.ErrInvalidContract, id)
 		}
 	}
 	return nil
+}
+
+func validateCanonicalFieldCheck(check contracts.Requirement, service, field string, expectedFilter map[string]string) error {
+	if check.Signal != "traces" || check.Field != field || check.Operation != "" || check.AlertID != "" || check.Timeout != "" {
+		return fmt.Errorf("%w: check %q does not match the canonical field tuple", contracts.ErrInvalidContract, check.ID)
+	}
+	actual, err := canonicalFilterTerms(check)
+	if err != nil || len(actual) != len(expectedFilter) {
+		return fmt.Errorf("%w: check %q has a non-canonical filter", contracts.ErrInvalidContract, check.ID)
+	}
+	for name, value := range expectedFilter {
+		if actual[name] != value {
+			return fmt.Errorf("%w: check %q has a non-canonical filter", contracts.ErrInvalidContract, check.ID)
+		}
+	}
+	return nil
+}
+
+func hasAnyFilter(check contracts.Requirement) bool {
+	return check.Filter != "" || len(check.Filters) > 0
+}
+
+func canonicalFilterTerms(check contracts.Requirement) (map[string]string, error) {
+	expressions := make([]string, 0, len(check.Filters)+1)
+	for _, filter := range check.Filters {
+		if filter == "" {
+			return nil, errors.New("empty filter")
+		}
+		if !containsString(expressions, filter) {
+			expressions = append(expressions, filter)
+		}
+	}
+	if check.Filter != "" && !containsString(expressions, check.Filter) {
+		expressions = append(expressions, check.Filter)
+	}
+	if len(expressions) != 1 {
+		return nil, errors.New("canonical check requires one filter")
+	}
+	return parseCanonicalFilter(expressions[0])
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func parseCanonicalFilter(expression string) (map[string]string, error) {
+	if strings.TrimSpace(expression) == "" {
+		return nil, errors.New("empty filter")
+	}
+	terms := make(map[string]string)
+	position := 0
+	for {
+		for position < len(expression) && isVerifierFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) {
+			return nil, errors.New("empty filter term")
+		}
+		fieldStart := position
+		for position < len(expression) && !isVerifierFilterSpace(expression[position]) && expression[position] != '=' {
+			position++
+		}
+		field := expression[fieldStart:position]
+		if !validVerifierFilterField(field) {
+			return nil, errors.New("unsupported filter field or operator")
+		}
+		for position < len(expression) && isVerifierFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) || expression[position] != '=' || (position+1 < len(expression) && expression[position+1] == '=') {
+			return nil, errors.New("filter term must use field = 'value'")
+		}
+		position++
+		for position < len(expression) && isVerifierFilterSpace(expression[position]) {
+			position++
+		}
+		if position >= len(expression) || expression[position] != '\'' {
+			return nil, errors.New("filter value must be single-quoted")
+		}
+		position++
+		valueStart := position
+		for position < len(expression) && expression[position] != '\'' {
+			position++
+		}
+		if position >= len(expression) {
+			return nil, errors.New("filter value has malformed quoting")
+		}
+		value := expression[valueStart:position]
+		position++
+		if _, exists := terms[field]; exists {
+			return nil, errors.New("duplicate filter field")
+		}
+		terms[field] = value
+		separatorStart := position
+		for position < len(expression) && isVerifierFilterSpace(expression[position]) {
+			position++
+		}
+		if position == len(expression) {
+			return terms, nil
+		}
+		if separatorStart == position || !strings.HasPrefix(expression[position:], "AND") || position+3 >= len(expression) || !isVerifierFilterSpace(expression[position+3]) {
+			return nil, errors.New("unsupported trailing filter expression")
+		}
+		position += 3
+		if position == len(expression) {
+			return nil, errors.New("empty filter term")
+		}
+	}
+}
+
+func validVerifierFilterField(field string) bool {
+	if field == "" {
+		return false
+	}
+	for _, character := range field {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune("._:-", character) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isVerifierFilterSpace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }
 
 func verifyField(ctx context.Context, client signoz.SigNozClient, contract contracts.Contract, requirement contracts.Requirement, config Config) evidence.CheckResult {
@@ -329,12 +496,19 @@ func traceCount(ctx context.Context, client signoz.SigNozClient, start, end time
 		return 0, err
 	}
 	total := 0.0
+	startMillis, endMillis := start.UnixMilli(), end.UnixMilli()
 	for _, series := range result.Results {
 		for _, aggregation := range series.Aggregations {
 			for _, timeSeries := range aggregation.Series {
 				for _, point := range timeSeries.Values {
+					if point.Timestamp <= 0 {
+						return 0, fmt.Errorf("%w: query point timestamp is invalid", signoz.ErrInvalidResponse)
+					}
 					if math.IsNaN(point.Value) || math.IsInf(point.Value, 0) || point.Value < 0 {
-						return 0, errors.New("malformed SigNoz count result")
+						return 0, fmt.Errorf("%w: malformed SigNoz count result", signoz.ErrInvalidResponse)
+					}
+					if point.Timestamp < startMillis || point.Timestamp > endMillis {
+						continue
 					}
 					total += point.Value
 				}
@@ -342,7 +516,7 @@ func traceCount(ctx context.Context, client signoz.SigNozClient, start, end time
 		}
 	}
 	if total > math.MaxInt {
-		return 0, errors.New("SigNoz count result overflow")
+		return 0, fmt.Errorf("%w: SigNoz count result overflow", signoz.ErrInvalidResponse)
 	}
 	return int(total), nil
 }
